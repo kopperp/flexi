@@ -126,7 +126,7 @@ USE MOD_Globals!,                   ONLY: MPIRoot,UNIT_STDOUT
 USE MOD_IO_HDF5,                    ONLY: AddToElemData,ElementOut
 USE MOD_Mesh_Vars,                  ONLY: nElems
 USE MOD_LoadBalance_Vars,           ONLY: nPartsPerElem
-USE MOD_Particle_Vars,              ONLY: ParticlesInitIsDone,nSpecies,WriteMacroVolumeValues,WriteMacroSurfaceValues
+USE MOD_Particle_Vars,              ONLY: ParticlesInitIsDone,nSpecies!,WriteMacroSurfaceValues
 USE MOD_part_emission,              ONLY: InitializeParticleEmission!, InitializeParticleSurfaceflux
 !USE MOD_DSMC_Analyze,               ONLY: InitHODSMC
 !USE MOD_DSMC_Init,                  ONLY: InitDSMC
@@ -163,7 +163,6 @@ IF(.NOT.ALLOCATED(nPartsPerElem))THEN
 END IF
 
 CALL InitializeVariables()
-!IF(useBGField) CALL InitializeBackgroundField()
 
 CALL InitializeParticleEmission()
 !CALL InitializeParticleSurfaceflux()
@@ -228,7 +227,7 @@ USE MOD_Particle_Output_Vars,  ONLY:WriteFieldsToVTK, OutputMesh
 !USE MOD_PICInterpolation,      ONLY:InitializeInterpolation
 !USE MOD_PICInit,               ONLY:InitPIC
 !USE MOD_Particle_Mesh,         ONLY:InitFIBGM,MapRegionToElem
-!USE MOD_Particle_Tracking_Vars,ONLY:DoRefMapping
+USE MOD_Particle_Tracking_Vars,ONLY:DoRefMapping
 !USE MOD_Particle_MPI_Vars,     ONLY:SafetyFactor,halo_eps_velo,PartMPI
 !USE MOD_part_pressure,         ONLY:ParticlePressureIni,ParticlePressureCellIni
 USE MOD_TimeDisc_Vars,         ONLY:TEnd
@@ -262,16 +261,16 @@ INTEGER               :: dummy_int
 PDM%maxParticleNumber = GETINT('Part-maxParticleNumber','1')
 !#if (PP_TimeDiscMethod==1)||(PP_TimeDiscMethod==2)||(PP_TimeDiscMethod==6)||(PP_TimeDiscMethod>=501 && PP_TimeDiscMethod<=506)
 
-!IF(DoRefMapping)THEN
-!  ALLOCATE(PartPosRef(1:3,PDM%MaxParticleNumber), STAT=ALLOCSTAT)
-!  IF (ALLOCSTAT.NE.0) CALL abort(&
-!  __STAMP__&
-!  ,' Cannot allocate partposref!')
-!  PartPosRef=-888.
-!END IF
+IF(DoRefMapping)THEN
+  ALLOCATE(PartPosRef(1:3,PDM%MaxParticleNumber), STAT=ALLOCSTAT)
+  IF (ALLOCSTAT.NE.0) CALL abort(&
+  __STAMP__&
+  ,' Cannot allocate partposref!')
+  PartPosRef=-888.
+END IF
 
 ! predefine random vectors
-!NumRanVec = GETINT('Particles-NumberOfRandomVectors','100000')
+NumRanVec = GETINT('Particles-NumberOfRandomVectors','100000')
 !IF ((usevMPF).OR.(useDSMC)) THEN
 !  ALLOCATE(RandomVec(NumRanVec, 3))
 !  RandomVec = 0
@@ -314,24 +313,6 @@ KeepWallParticles = .FALSE.
 
 nSpecies = GETINT('Part-nSpecies','1')
 
-! IMD data import from *.chkpt file
-!DoImportIMDFile=.FALSE. ! default
-!IMDLengthScale=0.0
-
-!IMDTimeScale          = GETREAL('IMDTimeScale','10.18e-15')
-!IMDLengthScale        = GETREAL('IMDLengthScale','1.0E-10')
-!IMDAtomFile           = GETSTR( 'IMDAtomFile','no file found')         
-!IMDCutOff             = GETSTR( 'IMDCutOff','no_cutoff')
-!IMDCutOffxValue       = GETREAL('IMDCutOffxValue','-999.9')
-
-!IF(TRIM(IMDAtomFile).NE.'no file found')DoImportIMDFile=.TRUE.
-!IF(DoImportIMDFile)THEN
-!  DoRefMapping=.FALSE. ! for faster init don't use DoRefMapping!
-!  SWRITE(UNIT_stdOut,'(A68,L,A)') ' | DoImportIMDFile=T DoRefMapping |                                 ',DoRefMapping,&
-!  ' | *CHANGE |'
-!END IF
-
-
 !! init varibale MPF per particle
 !IF (usevMPF) THEN
 !  enableParticleMerge = GETLOGICAL('Part-vMPFPartMerge','.FALSE.')
@@ -360,49 +341,7 @@ nSpecies = GETINT('Part-nSpecies','1')
 !  END IF
 !END IF
 
-!WriteOutputMesh (=vtk mesh at start, seperate mesh for each proc
-!OutputMesh = GETLOGICAL('Part-WriteOutputMesh','.FALSE.')
-           
-! Output of macroscopic values
-!WriteMacroValues = GETLOGICAL('Part-WriteMacroValues','.FALSE.')
-!WriteMacroVolumeValues = GETLOGICAL('Part-WriteMacroVolumeValues','.FALSE.')
-!WriteMacroSurfaceValues = GETLOGICAL('Part-WriteMacroSurfaceValues','.FALSE.')
-!IF(WriteMacroValues)THEN
-!  WriteMacroVolumeValues = .TRUE.
-!  WriteMacroSurfaceValues = .TRUE.
-!ELSE IF((WriteMacroVolumeValues.AND.WriteMacroSurfaceValues).AND.(.NOT.WriteMacroValues))THEN
-!  WriteMacroValues = .TRUE.
-!END IF
-!MacroValSamplIterNum = GETINT('Part-IterationForMacroVal','1')
-!DSMC%TimeFracSamp = GETREAL('Part-TimeFracForSampling','0.0')
-!DSMC%CalcSurfaceVal = GETLOGICAL('Particles-DSMC-CalcSurfaceVal','.FALSE.') 
-!IF(WriteMacroVolumeValues.OR.WriteMacroSurfaceValues)THEN
-!  IF(DSMC%TimeFracSamp.GT.0.0) CALL abort(&
-!__STAMP__&
-!    ,'ERROR: Init Macrosampling: WriteMacroValues and Time fraction sampling enabled at the same time')
-!  IF(WriteMacroSurfaceValues.AND.(.NOT.DSMC%CalcSurfaceVal)) DSMC%CalcSurfaceVal = .TRUE.
-!END IF
-!DSMC%NumOutput = GETINT('Particles-NumberForDSMCOutputs','0')
-!IF((DSMC%TimeFracSamp.GT.0.0).AND.(DSMC%NumOutput.EQ.0)) DSMC%NumOutput = 1
-!IF (DSMC%NumOutput.NE.0) THEN
-!  IF (DSMC%TimeFracSamp.GT.0.0) THEN
-!    DSMC%DeltaTimeOutput = (DSMC%TimeFracSamp * TEnd) / REAL(DSMC%NumOutput)
-!  ELSE
-!    DSMC%NumOutput=0
-!    SWRITE(UNIT_STDOUT,*)'DSMC_NumOutput was set to 0 because timefracsamp is 0.0'
-!  END IF
-!END IF
 
-!ParticlePushMethod = TRIM(GETSTR('Part-ParticlePushMethod','boris_leap_frog_scheme')
-!WriteFieldsToVTK = GETLOGICAL('Part-WriteFieldsToVTK','.FALSE.')
-
-!!!!! Logicals for Constant Pressure in Cells
-!! are particles to be ADDED to cells in order to reach constant pressure? Default YES
-!PartPressAddParts = GETLOGICAL('Part-ConstPressAddParts','.TRUE.')
-!! are particles to be REMOVED from cells in order to reach constant pressure? Default NO
-!PartPressRemParts = GETLOGICAL('Part-ConstPressRemParts','.FALSE.')
-
-! Read particle species data
 !nSpecies = CNTSTR('Part-Species-SpaceIC')
 
 IF (nSpecies.LE.0) THEN
@@ -1066,12 +1005,12 @@ PartBound%SolidState(1:nPartBound)=.FALSE.
 !  END IF
 !END DO
 
-!ALLOCATE(PEM%Element(1:PDM%maxParticleNumber), PEM%lastElement(1:PDM%maxParticleNumber), STAT=ALLOCSTAT) 
-!IF (ALLOCSTAT.NE.0) THEN
-! CALL abort(&
-!__STAMP__&
-!  ,' Cannot allocate PEM arrays!')
-!END IF
+ALLOCATE(PEM%Element(1:PDM%maxParticleNumber), PEM%lastElement(1:PDM%maxParticleNumber), STAT=ALLOCSTAT) 
+IF (ALLOCSTAT.NE.0) THEN
+ CALL abort(&
+__STAMP__&
+  ,' Cannot allocate PEM arrays!')
+END IF
 !IF (useDSMC.OR.PartPressureCell) THEN
 !  ALLOCATE(PEM%pStart(1:nElems)                         , &
 !           PEM%pNumber(1:nElems)                        , &
@@ -1093,22 +1032,6 @@ PartBound%SolidState(1:nPartBound)=.FALSE.
 !    ,' Cannot allocate DSMC PEM arrays!')
 !  END IF
 !END IF
-
-!--- Read Manual Time Step
-!useManualTimeStep = .FALSE.
-!ManualTimeStep = GETREAL('Particles-ManualTimeStep', '0.0')
-!IF (ManualTimeStep.GT.0.0) THEN
-!  useManualTimeStep=.True.
-!END IF
-!#if (PP_TimeDiscMethod==201||PP_TimeDiscMethod==200)
-!  dt_part_ratio = GETREAL('Particles-dt_part_ratio', '3.8')
-!  overrelax_factor = GETREAL('Particles-overrelax_factor', '1.0')
-!#if (PP_TimeDiscMethod==200)
-!IF ( ALMOSTEQUAL(overrelax_factor,1.0) .AND. .NOT.ALMOSTEQUAL(dt_part_ratio,3.8) ) THEN
-!  overrelax_factor = dt_part_ratio !compatibility
-!END IF
-!#endif
-!#endif
 
 !--- initialize randomization (= random if one or more seeds are 0 or random is wanted)
 !nrSeeds = GETINT('Part-NumberOfRandomSeeds','0')
@@ -1153,7 +1076,7 @@ PartBound%SolidState(1:nPartBound)=.FALSE.
 !#endif
 !   CALL RANDOM_SEED(PUT = Seeds(1:SeedSize))
 !END IF
-
+!
 !ALLOCATE(iseeds(SeedSize))
 !iseeds(:)=0
 !CALL RANDOM_SEED(GET = iseeds(1:SeedSize))
@@ -1165,7 +1088,7 @@ PartBound%SolidState(1:nPartBound)=.FALSE.
 !  END DO
 !END IF
 !DEALLOCATE(iseeds)
-!!DoZigguratSampling = GETLOGICAL('Particles-DoZigguratSampling','.FALSE.')
+!DoZigguratSampling = GETLOGICAL('Particles-DoZigguratSampling','.FALSE.')
 !DoPoissonRounding = GETLOGICAL('Particles-DoPoissonRounding','.FALSE.')
 !DoTimeDepInflow   = GETLOGICAL('Particles-DoTimeDepInflow','.FALSE.')
 !
@@ -1182,117 +1105,34 @@ PartBound%SolidState(1:nPartBound)=.FALSE.
 
 DelayTime = GETREAL('Part-DelayTime','0.')
 
-!!-- Read Flag for BGG via VTK-File (needed for particles in general as asked for in set velocity!)
-!useVTKFileBGG = GETLOGICAL('Particles-useVTKFileBGG','.FALSE.')
-!!-- Read Flag if warnings to be displayed for rejected velocities when virtual Pre-Inserting region (vpi) is used with PartDensity
-!OutputVpiWarnings = GETLOGICAL('Particles-OutputVpiWarnings','.FALSE.')
-!
-!
 !! init interpolation
 !CALL InitializeInterpolation() ! not any more required ! has to be called earliear
 !CALL InitPIC()
 !! always, because you have to construct a halo_eps region around each bc element
 !
-!#ifdef MPI
-!CALL MPI_BARRIER(PartMPI%COMM,IERROR)
-!#endif /*MPI*/
-!SWRITE(UNIT_StdOut,'(132("-"))')
-!SWRITE(UNIT_stdOut,'(A)')' INIT FIBGM...' 
-!SafetyFactor  =GETREAL('Part-SafetyFactor','1.0')
-!halo_eps_velo =GETREAL('Particles-HaloEpsVelo','0')
-!!-- Finalizing InitializeVariables
-!CALL InitFIBGM()
+#ifdef MPI
+CALL MPI_BARRIER(PartMPI%COMM,IERROR)
+#endif /*MPI*/
+SWRITE(UNIT_StdOut,'(132("-"))')
+SWRITE(UNIT_stdOut,'(A)')' INIT FIBGM...' 
+SafetyFactor  =GETREAL('Part-SafetyFactor','1.0')
+halo_eps_velo =GETREAL('Particles-HaloEpsVelo','200')
+!-- Finalizing InitializeVariables
+CALL InitFIBGM()
 !!CALL InitSFIBGM()
-!#ifdef MPI
-!CALL InitEmissionComm()
-!#endif /*MPI*/
-!#ifdef MPI
-!CALL MPI_BARRIER(PartMPI%COMM,IERROR)
-!#endif /*MPI*/
-!
-!SWRITE(UNIT_StdOut,'(132("-"))')
-!
-!!-- Read parameters for particle-data on region mapping
-!
-!!-- Read parameters for region mapping
-!NbrOfRegions = GETINT('NbrOfRegions','0')
-!IF (NbrOfRegions .GT. 0) THEN
-!  ALLOCATE(RegionBounds(1:6,1:NbrOfRegions))
-!  DO iRegions=1,NbrOfRegions
-!    WRITE(UNIT=hilf2,FMT='(I2)') iRegions
-!    RegionBounds(1:6,iRegions) = GETREALARRAY('RegionBounds'//TRIM(hilf2),6,'0. , 0. , 0. , 0. , 0. , 0.')
-!  END DO
-!END IF
-!
-!IF (NbrOfRegions .GT. 0) THEN
-!  CALL MapRegionToElem()
-!  ALLOCATE(RegionElectronRef(1:3,1:NbrOfRegions))
-!  DO iRegions=1,NbrOfRegions
-!    WRITE(UNIT=hilf2,FMT='(I2)') iRegions
-!    RegionElectronRef(1:3,iRegions) = GETREALARRAY('Part-RegionElectronRef'//TRIM(hilf2),3,'0. , 0. , 1.')
-!  END DO
-!END IF
+#ifdef MPI
+CALL InitEmissionComm()
+#endif /*MPI*/
+#ifdef MPI
+CALL MPI_BARRIER(PartMPI%COMM,IERROR)
+#endif /*MPI*/
 
-!exitTrue=.false.
-!DO iSpec = 1,nSpecies
-!  DO iInit = Species(iSpec)%StartnumberOfInits, Species(iSpec)%NumberOfInits
-!    IF((Species(iSpec)%Init(iInit)%ParticleEmissionType .EQ. 3).OR.(Species(iSpec)%Init(iInit)%ParticleEmissionType .EQ. 5)) THEN
-!      CALL ParticlePressureIni()
-!      exitTrue=.true.
-!      EXIT
-!    END IF
-!  END DO
-!  IF (exitTrue) EXIT
-!END DO
-
-!exitTrue=.false.
-!DO iSpec = 1,nSpecies
-!  DO iInit = Species(iSpec)%StartnumberOfInits, Species(iSpec)%NumberOfInits
-!    IF ((Species(iSpec)%Init(iInit)%ParticleEmissionType .EQ. 4).OR.(Species(iSpec)%Init(iInit)%ParticleEmissionType .EQ. 6)) THEN
-!      CALL ParticlePressureCellIni()
-!      exitTrue=.true.
-!      EXIT
-!    END IF
-!  END DO
-!  IF (exitTrue) EXIT
-!END DO
+SWRITE(UNIT_StdOut,'(132("-"))')
 
 !IF(enableParticleMerge) THEN
 ! CALL DefinePolyVec(vMPFMergePolyOrder) 
 ! CALL DefineSplitVec(vMPFMergeCellSplitOrder)
 !END IF
-!
-!!-- Floating Potential
-!ALLOCATE(BCdata_auxSF(1:nPartBound))
-!DO iPartBound=1,nPartBound
-!  BCdata_auxSF(iPartBound)%SideNumber=-1 !init value when not used
-!  BCdata_auxSF(iPartBound)%GlobalArea=0.
-!  BCdata_auxSF(iPartBound)%LocalArea=0.
-!END DO
-!nDataBC_CollectCharges=0
-!nCollectChargesBCs = GETINT('PIC-nCollectChargesBCs','0')
-!IF (nCollectChargesBCs .GT. 0) THEN
-!#if !(defined (PP_HDG) && (PP_nVar==1))
-!  CALL abort(__STAMP__&
-!    , 'CollectCharges only implemented for electrostatic HDG!')
-!#endif
-!  ALLOCATE(CollectCharges(1:nCollectChargesBCs))
-!  DO iCC=1,nCollectChargesBCs
-!    WRITE(UNIT=hilf,FMT='(I2)') iCC
-!    CollectCharges(iCC)%BC = GETINT('PIC-CollectCharges'//TRIM(hilf)//'-BC','0')
-!    IF (CollectCharges(iCC)%BC.LT.1 .OR. CollectCharges(iCC)%BC.GT.nPartBound) THEN
-!      CALL abort(__STAMP__&
-!      , 'nCollectChargesBCs must be between 1 and nPartBound!')
-!    ELSE IF (BCdata_auxSF(CollectCharges(iCC)%BC)%SideNumber.EQ. -1) THEN !not set yet
-!      BCdata_auxSF(CollectCharges(iCC)%BC)%SideNumber=0
-!      nDataBC_CollectCharges=nDataBC_CollectCharges+1 !side-data will be set in InitializeParticleSurfaceflux!!!
-!    END IF
-!    CollectCharges(iCC)%NumOfRealCharges = GETREAL('PIC-CollectCharges'//TRIM(hilf)//'-NumOfRealCharges','0.')
-!    CollectCharges(iCC)%NumOfNewRealCharges = 0.
-!    CollectCharges(iCC)%ChargeDist = GETREAL('PIC-CollectCharges'//TRIM(hilf)//'-ChargeDist','0.')
-!  END DO !iCC
-!END IF !nCollectChargesBCs .GT. 0
-
 
 END SUBROUTINE InitializeVariables
 
@@ -1315,28 +1155,21 @@ IMPLICIT NONE
 !-----------------------------------------------------------------------------------------------------------------------------------
 ! LOCAL VARIABLES
 !===================================================================================================================================
-!#if defined(LSERK)
-!!#if (PP_TimeDiscMethod==1)||(PP_TimeDiscMethod==2)||(PP_TimeDiscMethod==6)||(PP_TimeDiscMethod>=501 && PP_TimeDiscMethod<=506)
-!SDEALLOCATE( Pt_temp)
-!#endif
-!!SDEALLOCATE(SampDSMC)
-!SDEALLOCATE(PartPosRef)
-!SDEALLOCATE(RandomVec)
-!SDEALLOCATE(PartState)
-!SDEALLOCATE(LastPartPos)
-!SDEALLOCATE(PartSpecies)
-!SDEALLOCATE(Pt)
-!SDEALLOCATE(PDM%ParticleInside)
+SDEALLOCATE( Pt_temp)
+SDEALLOCATE(PartPosRef)
+SDEALLOCATE(RandomVec)
+SDEALLOCATE(PartState)
+SDEALLOCATE(LastPartPos)
+SDEALLOCATE(PartSpecies)
+SDEALLOCATE(Pt)
+SDEALLOCATE(PDM%ParticleInside)
 SDEALLOCATE(PDM%nextFreePosition)
 SDEALLOCATE(PDM%nextFreePosition)
-!SDEALLOCATE(PDM%dtFracPush)
-!SDEALLOCATE(PDM%IsNewPart)
-!SDEALLOCATE(vMPF_SpecNumElem)
+SDEALLOCATE(PDM%dtFracPush)
+SDEALLOCATE(PDM%IsNewPart)
 !SDEALLOCATE(PartMPF)
 !!SDEALLOCATE(Species%Init)
 SDEALLOCATE(Species)
-!SDEALLOCATE(IMDSpeciesID)
-!SDEALLOCATE(IMDSpeciesCharge)
 SDEALLOCATE(PartBound%SourceBoundName)
 SDEALLOCATE(PartBound%TargetBoundCond)
 SDEALLOCATE(PartBound%MomentumACC)

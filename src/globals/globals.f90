@@ -49,6 +49,7 @@ INTEGER           ::MPIStatus(MPI_STATUS_SIZE)
 
 LOGICAL           :: doGenerateUnittestReferenceData                         
 INTEGER           :: doPrintHelp ! 0: no help, 1: help, 2: markdown-help
+REAL              :: epsMach=epsilon(0.)
 
 INTERFACE Abort
   MODULE PROCEDURE Abort

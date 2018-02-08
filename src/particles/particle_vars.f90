@@ -28,41 +28,17 @@ REAL                  :: ManualTimeStep                                      ! M
 LOGICAL               :: useManualTimeStep                                   ! Logical Flag for manual timestep. For consistency
 !                                                                             ! with IAG programming style
 LOGICAL               :: KeepWallParticles                                   ! Flag for tracking of adsorbed Particles
-!LOGICAL               :: SolidSimFlag                                        ! Flag telling if Solid boundary is existing
-!LOGICAL               :: LiquidSimFlag                                       ! Flag telling if Liquid boundary is existing
 LOGICAL               :: printRandomSeeds                                    ! print random seeds or not
-!! IMD: Molecular Dynamics Model - ion distribution info
-!LOGICAL               :: DoImportIMDFile                                     ! read IMD (MD-Simulation) data from *.chkpt file
-!REAL                  :: IMDTimeScale                                        ! Time unit of input file
-!REAL                  :: IMDLengthScale                                      ! global IMD length scale
-!INTEGER               :: IMDNumber                                           ! Output number IMD Data file
-!CHARACTER(255)        :: IMDInputFile                                        ! Laser data file name containing PartState(1:6)
-!INTEGER               :: IMDnSpecies                                         ! number of IMD species
-!INTEGER , ALLOCATABLE :: IMDSpeciesID(:)                                     ! species ID for distributing the IMD atoms/ions
-!INTEGER , ALLOCATABLE :: IMDSpeciesCharge(:)                                 ! charge number of IMD atoms/ions
-!CHARACTER(255)        :: IMDAtomFile                                         ! Laser data file name containing PartState(1:6)
-!REAL                  :: IMDCutOffxValue                                     ! cut-off coordinate for IMDCutOff='coordiantes'
-!CHARACTER(255)        :: IMDCutOff                                           ! cut-off type for IMD data reduction: 1.) no_cutoff
-!                                                                             !                                      2.) Epot
-!                                                                             !                                      3.) coordinates
-!                                                                             !                                      4.) velocity
 !REAL                  :: dt_max_particles                                    ! Maximum timestep for particles (for static fields!)
 !REAL                  :: dt_maxwell                                          ! timestep for field solver (for static fields only!)
 !REAL                  :: dt_adapt_maxwell                                    ! adapted timestep for field solver dependent  
-!                                                                             ! on particle velocity (for static fields only!)
-!REAL                  :: dt_part_ratio, overrelax_factor                     ! factors for td200/201 overrelaxation/subcycling
-!INTEGER               :: NextTimeStepAdjustmentIter                          ! iteration of next timestep change
-!INTEGER               :: MaxwellIterNum                                      ! number of iterations for the maxwell solver
+                                                                             ! on particle velocity (for static fields only!)
 !INTEGER               :: WeirdElems                                          ! Number of Weird Elements (=Elements which are folded
-!                                                                             ! into themselves)
+                                                                              ! into themselves)
 REAL    , ALLOCATABLE :: PartState(:,:)                                      ! (1:NParts,1:6) with 2nd index: x,y,z,vx,vy,vz
-!REAL    , ALLOCATABLE :: PartPosRef(:,:)                                     ! (1:3,1:NParts) particles pos mapped to -1|1 space
-!INTEGER , ALLOCATABLE :: PartPosGauss(:,:)                                   ! (1:NParts,1:3) Gauss point localization of particles
+REAL    , ALLOCATABLE :: PartPosRef(:,:)                                     ! (1:3,1:NParts) particles pos mapped to -1|1 space
 REAL    , ALLOCATABLE :: Pt(:,:)                                             ! Derivative of PartState (vx,xy,vz) only
-!                                                                             ! since temporal derivative of position
-!                                                                             ! is the velocity. Thus we can take 
-!                                                                             ! PartState(:,4:6) as Pt(1:3)
-!                                                                             ! (1:NParts,1:6) with 2nd index: x,y,z,vx,vy,vz
+
 !#if defined(IMEX) || defined(IMPA)
 !REAL    , ALLOCATABLE :: PartStage (:,:,:)                                   ! ERK4 additional function values
 !REAL    , ALLOCATABLE :: PartStateN(:,:)                                     ! ParticleState at t^n
@@ -94,35 +70,13 @@ REAL    , ALLOCATABLE :: Pt(:,:)                                             ! D
 REAL    , ALLOCATABLE :: LastPartPos(:,:)                                    ! (1:NParts,1:3) with 2nd index: x,y,z
 INTEGER , ALLOCATABLE :: PartSpecies(:)                                      ! (1:NParts) 
 !REAL    , ALLOCATABLE :: PartMPF(:)                                          ! (1:NParts) MacroParticleFactor by variable MPF
-!INTEGER               :: PartLorentzType
-!CHARACTER(LEN=256)    :: ParticlePushMethod                                  ! Type of PP-Method
-!INTEGER               :: nrSeeds                                             ! Number of Seeds for Random Number Generator
-!INTEGER , ALLOCATABLE :: seeds(:)                        !        =>NULL()   ! Seeds for Random Number Generator
-!
-TYPE tConstPressure
-  INTEGER                                :: nElemTotalInside                  ! Number of elements totally in Emission Particle  
-  INTEGER                                :: nElemPartlyInside                 ! Number of elements partly in Emission Particle 
-  INTEGER, ALLOCATABLE                   :: ElemTotalInside(:)                ! List of elements totally in Emission Particle 
-                                                                              ! ElemTotalInside(1:nElemTotalInside)
-  INTEGER, ALLOCATABLE                   :: ElemPartlyInside(:)               ! List of elements partly in Emission Particle 
-                                                                              ! ElemTotalInside(1:nElemPartlyInside)
-  INTEGER(2), ALLOCATABLE                :: ElemStat(:)                       ! Status of Element to Emission Particle Space
-                                                                              ! ElemStat(nElem) = 1  -->  Element is totally insid
-                                                                              !                 = 2  -->  Element is partly  insid
-                                                                              !                 = 3  -->  Element is totally outsi
-  REAL                                   :: OrthoVector(3)                    ! Vector othogonal on BaseVector1IC and BaseVector2
-  REAL                                   :: Determinant                       ! Determinant for solving a 3x3 system of equations
-                                                                              ! to see whether a point is inside a cuboid
-  REAL                                   :: EkinInside                        ! Kinetic Energy in Emission-Area
-  REAL                                   :: InitialTemp                       ! Initial MWTemerature
-  REAL, ALLOCATABLE                      :: ConstPressureSamp(:,:)            ! ElemTotalInside(1:nElemTotalInside,1 = v_x
-                                                                              !                                    2 = v_y
-                                                                              !                                    3 = v_z
-                                                                              !                                    4 = dens. [1/m3]
-                                                                              !                                    5 = pressure
-                                                                              !                                    6 = v of sound**2
-END TYPE
+INTEGER               :: PartRHSMethod
 
+INTEGER               :: nrSeeds                                             ! Number of Seeds for Random Number Generator
+INTEGER , ALLOCATABLE :: seeds(:)                        !        =>NULL()   ! Seeds for Random Number Generator
+
+! ANO-PO
+! vermutlich weg
 TYPE tExcludeRegion
   CHARACTER(40)                          :: SpaceIC                          ! specifying Keyword for Particle Space condition
   REAL                                   :: RadiusIC                         ! Radius for IC circle
@@ -204,8 +158,8 @@ TYPE tInit                                                                   ! P
                                                                              !              - orifice
                                                                              !              - ...more following...
   LOGICAL                                :: vpiBVBuffer(4)                   ! incl. buffer region in -BV1/+BV1/-BV2/+BV2 direction?
-  TYPE(tConstPressure)                   :: ConstPress!(:)           =>NULL() !
-  INTEGER                                :: NumberOfExcludeRegions           ! Number of different regions to be excluded
+  !TYPE(tConstPressure)                   :: ConstPress!(:)           =>NULL() !
+  !INTEGER                                :: NumberOfExcludeRegions           ! Number of different regions to be excluded
   TYPE(tExcludeRegion), ALLOCATABLE      :: ExcludeRegion(:)
 #ifdef MPI
   INTEGER                                :: InitComm                          ! number of init-communicator
@@ -263,41 +217,40 @@ TYPE tSpecies                                                                ! P
   INTEGER                                :: StartnumberOfInits               ! 0 if old emit defined (array is copied into 0. entry)
   TYPE(tSurfaceflux),ALLOCATABLE         :: Surfaceflux(:)                   ! Particle Data for each SurfaceFlux emission
   INTEGER                                :: nSurfacefluxBCs                  ! Number of SF emissions
-#if (PP_TimeDiscMethod==120) || (PP_TimeDiscMethod==121) || (PP_TimeDiscMethod==122)
-  LOGICAL                                :: IsImplicit
-#endif
+!#if (PP_TimeDiscMethod==120) || (PP_TimeDiscMethod==121) || (PP_TimeDiscMethod==122)
+!  LOGICAL                                :: IsImplicit
+!#endif
 END TYPE
 
 REAL, ALLOCATABLE                        :: Adaptive_MacroVal(:,:,:)
 
 INTEGER                                  :: nSpecies                         ! number of species
 TYPE(tSpecies), ALLOCATABLE              :: Species(:)  !           => NULL() ! Species Data Vector
-!
-!TYPE tParticleElementMapping
-!  INTEGER                , ALLOCATABLE   :: Element(:)      !      =>NULL()  ! Element number allocated to each Particle
-!  INTEGER                , ALLOCATABLE   :: lastElement(:)  !      =>NULL()  ! Element number allocated
+
+TYPE tParticleElementMapping
+  INTEGER                , ALLOCATABLE   :: Element(:)      !      =>NULL()  ! Element number allocated to each Particle
+  INTEGER                , ALLOCATABLE   :: lastElement(:)  !      =>NULL()  ! Element number allocated
 !!#if (PP_TimeDiscMethod==120) || (PP_TimeDiscMethod==121) || (PP_TimeDiscMethod==122)
 !!  INTEGER                , ALLOCATABLE   :: StageElement(:)  !      =>NULL()  ! Element number allocated
 !!#endif
-!                                                                             ! to each Particle at previous timestep
-!!----------------------------------------------------------------------------!----------------------------------
-!                                                                             ! Following vectors are assigned in
-!                                                                             ! SUBROUTINE UpdateNextFreePosition
-!                                                                             ! IF (PIC%withDSMC .OR. PIC%withFP)
-!  INTEGER                , ALLOCATABLE    :: pStart(:)         !     =>NULL()  ! Start of Linked List for Particles in Element
-!                                                               !               ! pStart(1:PIC%nElem)
-!  INTEGER                , ALLOCATABLE    :: pNumber(:)        !     =>NULL()  ! Number of Particles in Element
-!                                                               !               ! pStart(1:PIC%nElem)
-!  INTEGER                , ALLOCATABLE    :: wNumber(:)        !     =>NULL()  ! Number of Wall-Particles in Element
-!                                                                               ! pStart(1:PIC%nElem)
-!  INTEGER                , ALLOCATABLE    :: pEnd(:)           !     =>NULL()  ! End of Linked List for Particles in Element
-!                                                               !               ! pEnd(1:PIC%nElem)
-!  INTEGER                , ALLOCATABLE    :: pNext(:)          !     =>NULL()  ! Next Particle in same Element (Linked List)
-!                                                                               ! pStart(1:PIC%maxParticleNumber)
-!END TYPE
-!
-!TYPE(tParticleElementMapping)            :: PEM
-!
+!----------------------------------------------------------------------------!----------------------------------
+                                                                             ! Following vectors are assigned in
+                                                                             ! SUBROUTINE UpdateNextFreePosition
+                                                                             ! IF (PIC%withDSMC .OR. PIC%withFP)
+  INTEGER                , ALLOCATABLE    :: pStart(:)         !     =>NULL()  ! Start of Linked List for Particles in Element
+                                                               !               ! pStart(1:PIC%nElem)
+  INTEGER                , ALLOCATABLE    :: pNumber(:)        !     =>NULL()  ! Number of Particles in Element
+                                                               !               ! pStart(1:PIC%nElem)
+  INTEGER                , ALLOCATABLE    :: wNumber(:)        !     =>NULL()  ! Number of Wall-Particles in Element
+                                                                               ! pStart(1:PIC%nElem)
+  INTEGER                , ALLOCATABLE    :: pEnd(:)           !     =>NULL()  ! End of Linked List for Particles in Element
+                                                               !               ! pEnd(1:PIC%nElem)
+  INTEGER                , ALLOCATABLE    :: pNext(:)          !     =>NULL()  ! Next Particle in same Element (Linked List)
+                                                                               ! pStart(1:PIC%maxParticleNumber)
+END TYPE
+
+TYPE(tParticleElementMapping)            :: PEM
+
 TYPE tParticleDataManagement
   INTEGER                                :: CurrentNextFreePosition           ! Index of nextfree index in nextFreePosition-Array
   INTEGER                                :: maxParticleNumber                 ! Maximum Number of all Particles
@@ -324,12 +277,6 @@ REAL                                     :: DelayTime
 
 LOGICAL                                  :: ParticlesInitIsDone=.FALSE.
 
-LOGICAL                                  :: WRITEMacroValues = .FALSE.
-LOGICAL                                  :: WriteMacroVolumeValues =.FALSE.   ! Output of macroscopic values in volume
-LOGICAL                                  :: WriteMacroSurfaceValues=.FALSE.   ! Output of macroscopic values on surface
-INTEGER                                  :: MacroValSamplIterNum              ! Number of iterations for sampling   
-                                                                              ! macroscopic values
-REAL                                     :: MacroValSampTime                  ! Sampling time for WriteMacroVal. (e.g., for td201)
 LOGICAL                                  :: usevMPF                           ! use the vMPF per particle
 !LOGICAL                                  :: enableParticleMerge               ! enables the particle merge routines
 !LOGICAL                                  :: doParticleMerge=.false.           ! flag for particle merge
@@ -362,28 +309,15 @@ LOGICAL                                  :: usevMPF                           ! 
 !LOGICAL                                  :: PartPressRemParts                 ! Should Parts be removed to reach wanted pressure?
 INTEGER                                  :: NumRanVec      ! Number of predefined random vectors
 REAL, ALLOCATABLE                        :: RandomVec(:,:) ! Random Vectos (NumRanVec, direction)
-!REAL, ALLOCATABLE                        :: RegionElectronRef(:,:)          ! RegionElectronRef((rho0,phi0,Te[eV])|1:NbrOfRegions)
-!LOGICAL                                  :: useVTKFileBGG                     ! Flag for BGG via VTK-File
-!REAL, ALLOCATABLE                        :: BGGdataAtElem(:,:)                ! data for BGG via VTK-File
 !LOGICAL                                  :: OutputVpiWarnings                 ! Flag for warnings for rejected v if VPI+PartDensity
-!LOGICAL                                  :: DoSurfaceFlux                     ! Flag for emitting by SurfaceFluxBCs
-!LOGICAL                                  :: DoPoissonRounding                 ! Perform Poisson sampling instead of random rounding
-!LOGICAL                                  :: DoTimeDepInflow                   ! Insertion and SurfaceFlux w simple random rounding
-!LOGICAL                                  :: DoZigguratSampling                ! Sample normal randoms with Ziggurat method
-!LOGICAL                                  :: FindNeighbourElems=.FALSE.
+LOGICAL                                  :: DoSurfaceFlux                     ! Flag for emitting by SurfaceFluxBCs
+LOGICAL                                  :: DoPoissonRounding                 ! Perform Poisson sampling instead of random rounding
+LOGICAL                                  :: DoTimeDepInflow                   ! Insertion and SurfaceFlux w simple random rounding
+LOGICAL                                  :: DoZigguratSampling                ! Sample normal randoms with Ziggurat method
+LOGICAL                                  :: FindNeighbourElems=.FALSE.
 !
 !INTEGER(8)                               :: nTotalPart
 !INTEGER(8)                               :: nTotalHalfPart
-!
-!INTEGER :: nCollectChargesBCs
-!INTEGER :: nDataBC_CollectCharges
-!TYPE tCollectCharges
-!  INTEGER                              :: BC
-!  REAL                                 :: NumOfRealCharges
-!  REAL                                 :: NumOfNewRealCharges
-!  REAL                                 :: ChargeDist
-!END TYPE
-!TYPE(tCollectCharges), ALLOCATABLE     :: CollectCharges(:)
 
 !===================================================================================================================================
 END MODULE MOD_Particle_Vars
