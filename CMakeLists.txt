@@ -86,13 +86,14 @@ SUBDIRLIST(EQNSYSTEMS ${CMAKE_CURRENT_SOURCE_DIR}/src/equations/)
 SUBDIRLIST(LIFTINGS   ${CMAKE_CURRENT_SOURCE_DIR}/src/dg/)
 
 OPTION(FLEXI_BUILDPOSTI "Build POSTI toolset" ON)
-OPTION(FLEXI_MPI "Compile SINGLE or MPI version" ON)
+OPTION(FLEXI_MPI "Compile SINGLE or MPI version" OFF)
 OPTION(FLEXI_PARABOLIC "Enable parabolic terms of equation-system" ON)
 OPTION(FLEXI_EDDYVISCOSITY "Enable eddy viscosity modells" OFF)
 OPTION(FLEXI_MKL "Use MKL libraries instead of BLAS/LAPACK" OFF)
 OPTION(FLEXI_PAPI "Use PAPI library to perform performance measurements (e.g. flop counts)." OFF)
 OPTION(FLEXI_FV "Enable Finite Volume subcell shock capturing" OFF)
 OPTION(FLEXI_2D "Enable two dimensional computation" OFF)
+OPTION(FLEXI_PARTICLES "Particles" ON)
 CMAKE_DEPENDENT_OPTION(FLEXI_FV_RECONSTRUCTION "Enable 2nd order reconstruction for FV" ON
                                                "FLEXI_FV" OFF)
 SET(   FLEXI_BUILD_HDF5 ON  CACHE BOOL "Compile and build hdf5 library")
@@ -195,6 +196,14 @@ ELSE()
     MESSAGE(SEND_ERROR " FLEXI_EDDYVISCOSITY is enabled, please enable PARABOLIC or disable FLEXI_EDDYVISCOSITY")
   ENDIF()
 ENDIF()
+
+# =========================================================================
+# PARTICLES
+# =========================================================================
+
+IF(FLEXI_PARTICLES)
+  ADD_DEFINITIONS(-DPARTICLES)
+ENDIF(FLEXI_PARTICLES)
 
 # =========================================================================
 # Dimension related preproc variables
@@ -534,6 +543,21 @@ IF (FLEXI_FV)
   FILE(GLOB fvF90 ./src/fv/*.f90)
   LIST(APPEND flexiF90 ${fvF90})
 ENDIF()
+
+# collect F90 files of 'particle' directory (recursive) in new list 'particlesF90'
+IF (FLEXI_PARTICLES)
+    FILE(GLOB_RECURSE particlesF90 ./src/particles/*.f90)
+#                               ./src/interpolation/eval_xyz.f90)
+ENDIF()
+# append 'particlesF90'-list to 'flexiF90'-list
+# collect F90 files for 'noparticle' in new list 'noparticlesF90'
+#FILE(GLOB noparticlesF90 ./src/particles/analyze/particle_analyze_vars.f90 
+#                         ./src/particles/particle_mesh/particle_surfaces_vars.f90)
+IF (FLEXI_PARTICLES)
+   LIST(APPEND flexiF90 ${particlesF90})
+ ELSE()
+   LIST(APPEND flexiF90 ${noparticlesF90})
+ENDIF(FLEXI_PARTICLES)
 
 # define libs
 ADD_LIBRARY(flexilibF90 OBJECT ${flexiF90})

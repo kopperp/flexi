@@ -53,7 +53,9 @@ TYPE tElementOut
   REAL,POINTER                          :: RealArray(:) => NULL()
   REAL,POINTER                          :: RealScalar   => NULL()
   INTEGER,POINTER                       :: IntArray(:)  => NULL()
+  INTEGER(KIND=8),POINTER               :: LongIntArray(:) => NULL()
   INTEGER,POINTER                       :: IntScalar    => NULL()
+  LOGICAL,POINTER                       :: LogArray(:)  => NULL()
   PROCEDURE(EvalElemInt),POINTER,NOPASS :: eval         => NULL()
   TYPE(tElementOut),POINTER             :: next         => NULL()     !< next list item
 END TYPE
@@ -266,7 +268,7 @@ END SUBROUTINE CloseDataFile
 !> Set pointers to element-wise arrays or scalars which will be gathered and written out. Both real or integer data types
 !> are supported. It is also possible to pass a function pointer which will be evaluated to calculate the data.
 !==================================================================================================================================
-SUBROUTINE AddToElemData(ElementOut_In,VarName,RealArray,RealScalar,IntArray,IntScalar,Eval)
+SUBROUTINE AddToElemData(ElementOut_In,VarName,RealArray,RealScalar,IntArray,LongIntArray,IntScalar,LogArray,Eval)
 ! MODULES
 USE MOD_Globals
 USE MOD_Mesh_Vars,ONLY:nElems
@@ -279,6 +281,8 @@ REAL,INTENT(IN),TARGET,OPTIONAL         :: RealArray(nElems) !< Data is an array
 REAL,INTENT(IN),TARGET,OPTIONAL         :: RealScalar        !< Data is a real scalar
 INTEGER,INTENT(IN),TARGET,OPTIONAL      :: IntArray(nElems)  !< Data is an array containing integers
 INTEGER,INTENT(IN),TARGET,OPTIONAL      :: IntScalar         !< Data is a integer scalar
+INTEGER(KIND=8),INTENT(IN),TARGET,OPTIONAL :: LongIntArray(nElems) !< Data is a integer scalar
+LOGICAL,INTENT(IN),TARGET,OPTIONAL         :: LogArray(nElems)     !< Data is a logical scalar
 PROCEDURE(EvalElemInt),POINTER,OPTIONAL :: Eval              !< Data is evaluated using a function pointer
 !----------------------------------------------------------------------------------------------------------------------------------
 ! LOCAL VARIABLES
@@ -318,6 +322,14 @@ IF(PRESENT(IntArray))THEN
 ENDIF
 IF(PRESENT(IntScalar))THEN
   eout%IntScalar  => IntScalar
+  nOpts=nOpts+1
+ENDIF
+IF(PRESENT(LongIntArray))THEN
+  eout%LongIntArray  => LongIntArray
+  nOpts=nOpts+1
+ENDIF
+IF(PRESENT(LogArray))THEN
+  eout%LogArray  => LogArray
   nOpts=nOpts+1
 ENDIF
 IF(PRESENT(eval))THEN
