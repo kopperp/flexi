@@ -107,6 +107,13 @@
 #define RECV 2
 
 !#define DEBUGMESH
+        
+! Boundaries for Particles
+#define PLANAR_RECT    0
+#define PLANAR_NONRECT 1
+#define BILINEAR       2
+#define PLANAR_CURVED  3
+#define CURVED         4
 
 #if !(FV_ENABLED)
 #define FV_Elems(x) 0

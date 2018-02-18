@@ -58,9 +58,9 @@ INTERFACE CountPartsPerElem
   MODULE PROCEDURE CountPartsPerElem
 END INTERFACE
 
-!INTERFACE CheckIfCurvedElem
-!  MODULE PROCEDURE CheckIfCurvedElem
-!END INTERFACE
+INTERFACE CheckIfCurvedElem
+  MODULE PROCEDURE CheckIfCurvedElem
+END INTERFACE
 
 INTERFACE InitElemBoundingBox
   MODULE PROCEDURE InitElemBoundingBox
@@ -101,15 +101,23 @@ SUBROUTINE InitParticleMesh()
 !===================================================================================================================================
 ! MODULES
 USE MOD_Globals
+USE MOD_Particle_Globals
 USE MOD_Preproc
+USE MOD_Metrics
+!USE MOD_Particle_Metrics
+USE MOD_Basis
+USE MOD_Particle_Basis
 USE MOD_Particle_Mesh_Vars
-USE MOD_Particle_Surfaces_Vars, ONLY:BezierEpsilonBilinear,BezierElevation,BezierControlPoints3DElevated
+USE MOD_Particle_Surfaces_Vars, ONLY:BezierControlPoints3D,SideSlabNormals,SideSlabIntervals
+USE MOD_Particle_Surfaces_Vars, ONLY:BoundingBoxIsEmpty,ElemSlabNormals,ElemSlabIntervals
+USE MOD_Particle_Surfaces_Vars, ONLY:BezierEpsilonBilinear,BezierElevation,BezierControlPoints3DElevated,Vdm_Bezier,sVdm_Bezier,d_bezier
 USE MOD_Particle_Tracking_Vars, ONLY:DoRefMapping,MeasureTrackTime,FastPeriodic,CountNbOfLostParts,nLostParts,CartesianPeriodic
 USE MOD_Particle_Tracking_Vars, ONLY:TriaTracking
+USE MOD_Interpolation_Vars
 #ifdef CODE_ANALYZE
 USE MOD_Particle_Tracking_Vars, ONLY:PartOut,MPIRankOut
 #endif /*CODE_ANALYZE*/
-USE MOD_Mesh_Vars,              ONLY:nElems,nSides,SideToElem,ElemToSide,NGeo,NGeoElevated,OffSetElem,ElemToElemGlob
+USE MOD_Mesh_Vars,              !ONLY:nElems,nSides,SideToElem,ElemToSide,NGeo,OffSetElem!,NGeoElevated,ElemToElemGlob
 USE MOD_ReadInTools,            ONLY:GETREAL,GETINT,GETLOGICAL,GetRealArray
 USE MOD_Particle_Surfaces_Vars, ONLY:BezierSampleN,BezierSampleXi
 USE MOD_Mesh_Vars,              ONLY:useCurveds,NGeo
@@ -123,8 +131,18 @@ IMPLICIT NONE
 !-----------------------------------------------------------------------------------------------------------------------------------
 ! LOCAL VARIABLES
 INTEGER           :: ALLOCSTAT,RefMappingGuessProposal
-INTEGER           :: iElem, ilocSide,iSide,iSample,ElemIDGlob
+INTEGER           :: i,iElem, ilocSide,iSide,iSample,ElemIDGlob
 CHARACTER(LEN=2)  :: hilf
+
+! partns
+REAL,DIMENSION(0:NGeo) :: wBary_NGeo!,XiCL_NGeo!,wBaryCL_NGeo
+REAL,DIMENSION(0:PP_N) :: XiCL_N,wBaryCL_N
+INTEGER                :: FirstElemID,LastElemID,locMortarSide,NBElemID,SideID2,NBlocSideID
+TYPE(tElem),POINTER    :: aElem
+TYPE(tSide),POINTER    :: aSide,mSide
+INTEGER                :: iMortar,nMortars
+INTEGER                :: LocSideID
+INTEGER                :: SideID
 !===================================================================================================================================
 
 SWRITE(UNIT_StdOut,'(132("-"))')
@@ -144,6 +162,82 @@ IF (ALLOCSTAT.NE.0) CALL abort(&
 __STAMP__&
 ,'  Cannot allocate particle mesh vars!')
 
+DoWriteStateToHDF5=GETLOGICAL('DoWriteStateToHDF5','.TRUE.')
+
+! Partns
+ALLOCATE(Xi_NGeo(0:NGeo))
+ALLOCATE(Vdm_CLNGeo_GaussN(0:PP_N,0:NGeo))
+ALLOCATE(Vdm_CLNGeo_CLN(0:PP_N,0:NGeo))
+ALLOCATE(Vdm_NGeo_CLNGeo(0:PP_N,0:NGeo))
+ALLOCATE(MortarSlave2MasterInfo(1:nSides))
+
+! build global connection of elements to elements
+FirstElemID=offsetElem+1
+LastElemID=offsetElem+nElems
+ALLOCATE(ElemToElemGlob(1:4,1:6,FirstElemID:LastElemID))
+ElemToElemGlob=-1
+DO iElem=1,nElems
+  DO ilocSide=1,6
+    SideID=ElemToSide(E2S_SIDE_ID,ilocSide,iElem)
+    IF(SideID.LE.nBCSides) ElemToElemGlob(1,ilocSide,offSetElem+iElem)=0
+    locMortarSide=MortarType(2,SideID)
+    
+    ! partns - FLEXI uses MortarType = 0 instead of -1
+!    IF(locMortarSide.EQ.-1)THEN ! normal side or small mortar side
+    IF(locMortarSide.EQ.0)THEN ! normal side or small mortar side
+      NBElemID=SideToElem(S2E_NB_ELEM_ID,SideID)
+      IF(NBElemID.GT.0)THEN
+        IF(NBElemID.NE.iElem) ElemToElemGlob(1,ilocSide,offSetElem+iElem)=offSetElem+NBElemID
+      END IF
+      NBElemID=SideToElem(S2E_ELEM_ID,SideID)
+      IF(NBElemID.GT.0)THEN
+        IF(NBElemID.NE.iElem) ElemToElemGlob(1,ilocSide,offSetElem+iElem)=offSetElem+NBElemID
+      END IF
+    ELSE ! mortar side
+      DO iMortar=1,4
+        SideID2=MortarInfo(MI_SIDEID,iMortar,locMortarSide)
+        IF(SideID2.GT.0)THEN
+          NBElemID=SideToElem(S2E_NB_ELEM_ID,SideID2)
+          IF(NBElemID.GT.0)THEN
+            ElemToElemGlob(iMortar,ilocSide,offSetElem+iElem)=offSetElem+NBElemID
+            ! mapping from small mortar side to neighbor, inverse of above
+            NBlocSideID=SideToElem(S2E_NB_LOC_SIDE_ID,SideID2)
+            ElemToElemGlob(1,NBlocSideID,offSetElem+NBElemID)=offSetElem+iElem
+          END IF
+        END IF
+      END DO ! iMortar=1,4
+    END IF ! locMortarSide
+    ! self connectivity in MPI case
+    IF(ElemToElemGlob(1,ilocSide,offSetElem+iElem).EQ.-1) ElemToElemGlob(1,ilocSide,offSetElem+iElem) = offSetElem+iElem
+  END DO ! ilocSide=1,6
+END DO ! iElem=1,PP_N
+
+DO iElem=1,nElems
+  aElem=>Elems(iElem+offsetElem)%ep
+  DO LocSideID=1,6
+    aSide=>aElem%Side(LocSideID)%sp
+    nMortars=aSide%nMortars
+    DO iMortar=0,nMortars
+      IF(iMortar.GT.0) aSide=>aElem%Side(LocSideID)%sp%mortarSide(iMortar)%sp
+      ! partns
+!      IF((aSide%SideID.GT.offsetMPISides_MINE(0)       ).AND.&
+!         (aSide%SideID.LE.offsetMPISides_YOUR(nNBProcs)))THEN
+!        IF(iMortar.EQ.0)THEN
+!          ElemToElemGlob(1,locSideID,offSetElem+iElem)=ElemID_YOUR(aside%sideID)
+!        ELSE
+!          ElemToElemGlob(iMortar,locSideID,offSetElem+iElem)=ElemID_YOUR(aside%sideID)
+!        END IF
+!      END IF
+    END DO ! iMortar
+  END DO ! LocSideID
+END DO ! iElem
+!----------------------------------------------------------------------------------------------------------------------------------
+
+DO i=0,NGeo
+  Xi_NGeo(i) = 2./REAL(NGeo) * REAL(i) - 1. 
+END DO
+DeltaXi_NGeo=2./NGeo
+!----------------------------------------------------------------------------------------------------------------------------------
 
 DoRefMapping       = GETLOGICAL('DoRefMapping',".TRUE.")
 #if (PP_TimeDiscMethod==4 || PP_TimeDiscMethod==42)
@@ -230,7 +324,7 @@ DO iSample=0,BezierSampleN
 END DO
 
 ! copy
-DO iElem=1,PP_nElems
+DO iElem=1,PP_N
   DO iLocSide=1,6
     PartElemToSide(:,iLocSide,iElem)=ElemToSide(:,iLocSide,iElem)
   END DO 
@@ -241,6 +335,63 @@ DO iSide=1,nSides
   PartSideToElem(:,iSide)=SideToElem(:,iSide)
 END DO 
 
+ALLOCATE(wBaryCL_NGeo(0:NGeo))
+ALLOCATE(XiCL_NGeo(0:NGeo))
+ALLOCATE(DCL_NGeo(0:NGeo,0:NGeo))
+
+! Chebyshev-Lobatto NGeo
+CALL ChebyGaussLobNodesAndWeights(NGeo,XiCL_NGeo)
+CALL BarycentricWeights(NGeo,XiCL_NGeo,wBaryCL_NGeo)
+CALL PolynomialDerivativeMatrix(NGeo,XiCL_NGeo,DCL_NGeo)
+
+! partns - already done in metrics.f90
+!CALL InitializeVandermonde(NGeo,PP_N   ,wBaryCL_NGeo,XiCL_NGeo,xGP      ,Vdm_CLNGeo_GaussN)
+!CALL InitializeVandermonde(NGeo,PP_N   ,wBaryCL_NGeo,XiCL_NGeo,XiCL_N   ,Vdm_CLNGeo_CLN   )
+!CALL InitializeVandermonde(NGeo,NGeo,wBary_NGeo  ,Xi_NGeo  ,XiCL_NGeo,Vdm_NGeo_CLNGeo  )
+
+! partns - get Bezier control points
+ALLOCATE(BezierControlPoints3D(1:3,0:NGeo,0:NGeo,1:nSides) ) 
+BezierControlPoints3D=0.
+
+ALLOCATE(SideSlabNormals(1:3,1:3,1:nSides),SideSlabIntervals(1:6,nSides),BoundingBoxIsEmpty(1:nSides) )
+SideSlabNormals=0.
+SideSlabIntervals=0.
+BoundingBoxIsEmpty=.TRUE.
+ALLOCATE(ElemSlabNormals(1:3,0:3,1:nElems),ElemSlabIntervals(1:6,nElems) )
+ElemSlabNormals=0.
+ElemSlabIntervals=0.
+
+! small wBaryCL_NGEO
+ALLOCATE(wBaryCL_NGeo1(0:1),XiCL_NGeo1(0:1))
+CALL ChebyGaussLobNodesAndWeights(1,XiCL_NGeo1)
+CALL BarycentricWeights(1,XiCL_NGeo1,wBaryCL_NGeo1)
+ALLOCATE(Vdm_CLNGeo1_CLNGeo(0:NGeo,0:1) )
+CALL InitializeVandermonde(1, NGeo,wBaryCL_NGeo1,XiCL_NGeo1,XiCL_NGeo ,Vdm_CLNGeo1_CLNGeo)
+
+! new for curved particle sides
+ALLOCATE(Vdm_Bezier(0:NGeo,0:NGeo),sVdm_Bezier(0:NGeo,0:NGeo))
+! initialize vandermonde for super-sampled surfaces (particle tracking with curved elements)
+!DO i=0,NGeo_in
+!  XiEquiPartCurved(i) = 2./REAL(NGeo_in) * REAL(i) - 1. 
+!END DO
+! initialize vandermonde for bezier basis surface representation (particle tracking with curved elements)
+CALL BuildBezierVdm(NGeo,XiCL_NGeo,Vdm_Bezier,sVdm_Bezier) !CHANGETAG
+ALLOCATE(D_Bezier(0:NGeo,0:NGeo))
+CALL BuildBezierDMat(NGeo,Xi_NGeo,D_Bezier)
+
+! partns - get connectivity for particles
+! get XCL_NGeo
+!do iElem=1,nElems
+    ALLOCATE(XCL_NGeo(1:3,0:NGeo,0:NGeo,0:NGeo,1:nElems))
+    XCL_NGeo = 0.
+    ALLOCATE(dXCL_NGeo(1:3,1:3,0:NGeo,0:NGeo,0:NGeo,1:nElems))
+    dXCL_NGeo = 0.
+    CALL CalcMetrics(XCL_NGeo_Out=XCL_NGeo,dXCL_NGeo_Out=dXCL_NGeo)
+!enddo
+
+! compute elem bary and elem radius
+ALLOCATE(ElemBaryNGeo(1:3,1:nElems) )
+CALL BuildElementOrigin()
 
 ParticleMeshInitIsDone=.TRUE.
 SWRITE(UNIT_stdOut,'(A)')' INIT PARTICLE MESH DONE!'
@@ -256,8 +407,8 @@ SUBROUTINE InitTriaParticleGeometry()
 ! MODULES
 USE MOD_PreProc
 USE MOD_Globals
-USE MOD_Mesh_Vars,          ONLY : nElems, XCL_NGeo, NGeo
-USE MOD_Particle_Mesh_Vars, ONLY : GEO, PartElemToSide
+USE MOD_Mesh_Vars,          ONLY : nElems, NGeo!,XCL_NGeo
+USE MOD_Particle_Mesh_Vars!, ONLY : GEO, PartElemToSide
 ! IMPLICIT VARIABLE HANDLING
  IMPLICIT NONE
 !-----------------------------------------------------------------------------------------------------------------------------------
@@ -411,6 +562,48 @@ SWRITE(UNIT_stdOut,'(A)')' INIT PARTICLE TRIANGLE GEOMETRY INFORMATION DONE!'
 SWRITE(UNIT_StdOut,'(132("-"))')
 END SUBROUTINE InitTriaParticleGeometry
 
+SUBROUTINE BuildElementOrigin()
+!================================================================================================================================
+! compute the element origin at xi=(0,0,0)^T and set it as ElemBaryNGeo
+!================================================================================================================================
+USE MOD_Globals!,                  ONLY:CROSS
+USE MOD_Preproc
+USE MOD_Mesh_Vars,                ONLY:NGeo
+USE MOD_Particle_Mesh_Vars,       ONLY:XCL_NGeo,wBaryCL_NGeo,XiCL_NGeo
+USE MOD_Particle_Mesh_Vars,       ONLY:ElemBaryNGeo
+USE MOD_Basis,                    ONLY:LagrangeInterpolationPolys
+! IMPLICIT VARIABLE HANDLING
+IMPLICIT NONE
+!--------------------------------------------------------------------------------------------------------------------------------
+! INPUT VARIABLES
+!--------------------------------------------------------------------------------------------------------------------------------
+!OUTPUT VARIABLES
+!--------------------------------------------------------------------------------------------------------------------------------
+! LOCAL VARIABLES
+INTEGER                 :: iElem,i,j,k
+REAL                    :: XPos(3),buf
+REAL                    :: Lag(1:3,0:NGeo)
+!================================================================================================================================
+
+ElemBaryNGeo=0.
+DO iElem=1,PP_N
+  ! evaluate the polynomial at origin: Xi=(/0.0,0.0,0.0/)
+  CALL LagrangeInterpolationPolys(0.0,NGeo,XiCL_NGeo,wBaryCL_NGeo,Lag(1,:))
+  CALL LagrangeInterpolationPolys(0.0,NGeo,XiCL_NGeo,wBaryCL_NGeo,Lag(2,:))
+  CALL LagrangeInterpolationPolys(0.0,NGeo,XiCL_NGeo,wBaryCL_NGeo,Lag(3,:))
+  xPos=0.
+  DO k=0,NGeo
+    DO j=0,NGeo
+      buf=Lag(2,j)*Lag(3,k)
+      DO i=0,NGeo
+        xPos=xPos+XCL_NGeo(:,i,j,k,iElem)*Lag(1,i)*buf
+      END DO !i=0,NGeo
+    END DO !j=0,NGeo
+  END DO !k=0,NGeo
+  ElemBaryNGeo(:,iElem)=xPos
+END DO ! iElem
+
+END SUBROUTINE BuildElementOrigin
 
 SUBROUTINE FinalizeParticleMesh()
 !===================================================================================================================================
@@ -460,6 +653,16 @@ SDEALLOCATE(ListDistance)
 SDEALLOCATE(isTracingTrouble)
 SDEALLOCATE(ElemTolerance)
 
+SDEALLOCATE(XiCL_NGeo1)
+SDEALLOCATE(wbaryCL_NGeo)
+SDEALLOCATE(XiCL_NGeo)
+
+SDEALLOCATE(MortarSlave2MasterInfo)
+
+!SDEALLOCATE(Vdm_CLNGeo_GaussN)
+!SDEALLOCATE(Vdm_CLNGeo_CLN)
+!SDEALLOCATE(Vdm_NGeo_CLNGeo)
+
 ParticleMeshInitIsDone=.FALSE.
 
 END SUBROUTINE FinalizeParticleMesh
@@ -473,17 +676,19 @@ SUBROUTINE SingleParticleToExactElement(iPart,doHalo,initFix,doRelocate)
 !===================================================================================================================================
 ! MODULES
 USE MOD_Globals
+USE MOD_Particle_Globals
 USE MOD_Preproc
 USE MOD_Particle_Vars,               ONLY:PartState,PEM,PDM,PartPosRef,KeepWallParticles
 USE MOD_Particle_Mesh_Vars,          ONLY:Geo
 USE MOD_Particle_Tracking_Vars,      ONLY:DoRefMapping,TriaTracking
 USE MOD_Particle_Mesh_Vars,          ONLY:epsOneCell,IsBCElem,ElemRadius2NGeo
 USE MOD_Eval_xyz,                    ONLY:eval_xyz_elemcheck
-USE MOD_Utils,                       ONLY:InsertionSort !BubbleSortID
+USE MOD_Particle_Utils,              ONLY:InsertionSort !BubbleSortID
 USE MOD_Particle_Tracking_Vars,      ONLY:DoRefMapping,Distance,ListDistance
-USE MOD_Particle_Boundary_Condition, ONLY:PARTSWITCHELEMENT
+!USE MOD_Particle_Boundary_Condition, ONLY:PARTSWITCHELEMENT
 USE MOD_Particle_MPI_Vars,           ONLY:PartHaloElemToProc
-USE MOD_Mesh_Vars,                   ONLY:ElemToSide,BC,ElemBaryNGeo
+USE MOD_Mesh_Vars,                   ONLY:ElemToSide,BC
+USE MOD_Particle_Mesh_Vars,          ONLY:ElemBaryNGeo
 ! IMPLICIT VARIABLE HANDLING
 IMPLICIT NONE                                                                                   
 !-----------------------------------------------------------------------------------------------------------------------------------
@@ -517,7 +722,14 @@ IF (KeepWallParticles) THEN
   END IF
 END IF
 
-IF (.NOT.DoRelocate) THEN
+IF(DoHALO)THEN
+  IF ( (PartState(iPart,1).LT.GEO%xminglob).OR.(PartState(iPart,1).GT.GEO%xmaxglob).OR. &
+       (PartState(iPart,2).LT.GEO%yminglob).OR.(PartState(iPart,2).GT.GEO%ymaxglob).OR. &
+       (PartState(iPart,3).LT.GEO%zminglob).OR.(PartState(iPart,3).GT.GEO%zmaxglob)) THEN
+     PDM%ParticleInside(iPart) = .FALSE.
+     RETURN
+  END IF
+ELSE
   IF ( (PartState(iPart,1).LT.GEO%xmin).OR.(PartState(iPart,1).GT.GEO%xmax).OR. &
        (PartState(iPart,2).LT.GEO%ymin).OR.(PartState(iPart,2).GT.GEO%ymax).OR. &
        (PartState(iPart,3).LT.GEO%zmin).OR.(PartState(iPart,3).GT.GEO%zmax)) THEN
@@ -525,6 +737,15 @@ IF (.NOT.DoRelocate) THEN
      RETURN
   END IF
 END IF
+
+!IF (.NOT.DoRelocate) THEN
+!  IF ( (PartState(iPart,1).LT.GEO%xmin).OR.(PartState(iPart,1).GT.GEO%xmax).OR. &
+!       (PartState(iPart,2).LT.GEO%ymin).OR.(PartState(iPart,2).GT.GEO%ymax).OR. &
+!       (PartState(iPart,3).LT.GEO%zmin).OR.(PartState(iPart,3).GT.GEO%zmax)) THEN
+!     PDM%ParticleInside(iPart) = .FALSE.
+!     RETURN
+!  END IF
+!END IF
 
 ! --- get background mesh cell of particle
 CellX = CEILING((PartState(iPart,1)-GEO%xminglob)/GEO%FIBGMdeltas(1)) 
@@ -587,8 +808,10 @@ DO iBGMElem=1,nBGMElems
   IF(ALMOSTEQUAL(Distance(iBGMElem),-1.))CYCLE
   ElemID=ListDistance(iBGMElem)
   IF(.NOT.DoHALO)THEN
-    IF(ElemID.GT.PP_nElems) CYCLE
+    IF(ElemID.GT.PP_N) CYCLE
   END IF
+!  IF(IsTracingBCElem(ElemID))THEN
+      ! partns
   IF(IsBCElem(ElemID))THEN
     CALL PartInElemCheck(PartState(iPart,1:3),iPart,ElemID,InElementCheck)
     IF(.NOT.InElementCheck) CYCLE
@@ -670,7 +893,7 @@ __STAMP__&
 !         ! check if neighbor element is an mpi-element and if yes,
 !         ! only take the particle if I am the lower rank
          Moved = PARTSWITCHELEMENT(locxi,loceta,locSideID,SideID,ElemID)
-         IF(Moved(1).GT.PP_nElems)THEN
+         IF(Moved(1).GT.PP_N)THEN
            IF(PartHaloElemToProc(NATIVE_PROC_ID,Moved(1)).LT.MyRank)THEN
              InElementCheck=.FALSE.
            END IF
@@ -709,13 +932,14 @@ SUBROUTINE SingleParticleToExactElementNoMap(iPart,doHALO,doRelocate)
 !===================================================================================================================================
 ! MODULES
 USE MOD_Globals
+USE MOD_Particle_Globals
 USE MOD_Preproc
 USE MOD_Particle_Vars,          ONLY:PartState,PEM,PDM
 USE MOD_Particle_Mesh_Vars,     ONLY:ElemRadius2NGeo
 USE MOD_Particle_Mesh_Vars,     ONLY:Geo
-USE MOD_Utils,                  ONLY:InsertionSort !BubbleSortID
+USE MOD_Particle_Utils,         ONLY:InsertionSort !BubbleSortID
 USE MOD_Particle_Tracking_Vars, ONLY:Distance,ListDistance
-USE MOD_Mesh_Vars,              ONLY: ElemBaryNGeo
+USE MOD_Particle_Mesh_Vars,     ONLY: ElemBaryNGeo
 ! IMPLICIT VARIABLE HANDLING
 IMPLICIT NONE                                                                                   
 !-----------------------------------------------------------------------------------------------------------------------------------
@@ -736,7 +960,14 @@ REAL                              :: Distance2
 !===================================================================================================================================
 
 ParticleFound = .FALSE.
-IF(.NOT.DoRelocate)THEN
+IF(DoHALO)THEN
+  IF ( (PartState(iPart,1).LT.GEO%xminglob).OR.(PartState(iPart,1).GT.GEO%xmaxglob).OR. &
+       (PartState(iPart,2).LT.GEO%yminglob).OR.(PartState(iPart,2).GT.GEO%ymaxglob).OR. &
+       (PartState(iPart,3).LT.GEO%zminglob).OR.(PartState(iPart,3).GT.GEO%zmaxglob)) THEN
+     PDM%ParticleInside(iPart) = .FALSE.
+     RETURN
+  END IF
+ELSE
   IF ( (PartState(iPart,1).LT.GEO%xmin).OR.(PartState(iPart,1).GT.GEO%xmax).OR. &
        (PartState(iPart,2).LT.GEO%ymin).OR.(PartState(iPart,2).GT.GEO%ymax).OR. &
        (PartState(iPart,3).LT.GEO%zmin).OR.(PartState(iPart,3).GT.GEO%zmax)) THEN
@@ -744,7 +975,6 @@ IF(.NOT.DoRelocate)THEN
      RETURN
   END IF
 END IF
-
 ! --- get background mesh cell of particle
 CellX = CEILING((PartState(iPart,1)-GEO%xminglob)/GEO%FIBGMdeltas(1)) 
 CellX = MAX(MIN(GEO%TFIBGMimax,CellX),GEO%TFIBGMimin)
@@ -765,7 +995,7 @@ ListDistance=0
 DO iBGMElem = 1, nBGMElems
   ElemID = GEO%TFIBGM(CellX,CellY,CellZ)%Element(iBGMElem)
   IF(.NOT.DoHALO)THEN
-    IF(ElemID.GT.PP_nElems) CYCLE
+    IF(ElemID.GT.PP_N) CYCLE
   END IF
   Distance2=(PartState(iPart,1)-ElemBaryNGeo(1,ElemID))*(PartState(iPart,1)-ElemBaryNGeo(1,ElemID)) &
            +(PartState(iPart,2)-ElemBaryNGeo(2,ElemID))*(PartState(iPart,2)-ElemBaryNGeo(2,ElemID)) &
@@ -780,9 +1010,12 @@ END DO ! nBGMElems
 
 IF(ALMOSTEQUAL(MAXVAL(Distance),-1.))THEN
   PDM%ParticleInside(iPart) = .FALSE.
-  IF(DoRelocate) CALL abort(&
-__STAMP__&
-, ' halo mesh to small. increase halo distance')
+  IF(DoRelocate)THEN
+    IPWRITE(UNIT_StdOut,*) 'Position',PartState(iPart,1:3)
+    CALL abort(&
+  __STAMP__&
+  , ' halo mesh too small. increase halo distance')
+  END IF
   RETURN
 END IF
 
@@ -794,7 +1027,7 @@ DO iBGMElem=1,nBGMElems
   IF(ALMOSTEQUAL(Distance(iBGMElem),-1.))CYCLE
   ElemID=ListDistance(iBGMElem)
   IF(.NOT.DoHALO)THEN
-    IF(ElemID.GT.PP_nElems) CYCLE
+    IF(ElemID.GT.PP_N) CYCLE
   END IF
   CALL PartInElemCheck(PartState(iPart,1:3),iPart,ElemID,InElementCheck)
 
@@ -826,7 +1059,8 @@ SUBROUTINE PartInElemCheck(PartPos_In,PartID,ElemID,FoundInElem,IntersectPoint_O
 ! Checks if particle is in Element
 !===================================================================================================================================
 ! MODULES
-USE MOD_Mesh_Vars,              ONLY:ElemBaryNGeo
+USE MOD_Particle_Globals
+USE MOD_Particle_Mesh_Vars,     ONLY:ElemBaryNGeo
 USE MOD_Particle_Surfaces_Vars, ONLY:SideType,SideNormVec
 USE MOD_Particle_Mesh_Vars,     ONLY:PartElemToSide,PartBCSideList
 USE MOD_Particle_Surfaces,      ONLY:CalcNormAndTangBilinear,CalcNormAndTangBezier
@@ -965,6 +1199,7 @@ DO ilocSide=1,6
     END IF
   END IF
 #endif /*CODE_ANALYZE*/
+  ! partns
   IF(alpha.GT.-1)THEN
     SELECT CASE(SideType(SideID))
     CASE(PLANAR_RECT,PLANAR_NONRECT,PLANAR_CURVED)
@@ -1099,7 +1334,7 @@ USE MOD_Particle_MPI,                       ONLY:InitHALOMesh
 USE MOD_Particle_MPI_Vars,                  ONLY:printMPINeighborWarnings
 #endif /*MPI*/
 USE MOD_Particle_MPI_Vars,                  ONLY:PartMPI
-USE MOD_Mesh_Vars,                          ONLY:ElemBaryNGeo
+USE MOD_Particle_Mesh_Vars,                 ONLY:ElemBaryNGeo
 USE MOD_Particle_Tracking_Vars,             ONLY:TriaTracking
 ! IMPLICIT VARIABLE HANDLING
 IMPLICIT NONE
@@ -1111,7 +1346,7 @@ IMPLICIT NONE
 !-----------------------------------------------------------------------------------------------------------------------------------
 ! LOCAL VARIABLES
 REAL                     :: StartT,EndT
-INTEGER                  :: iElem,ElemToBGM(1:6,1:PP_nElems)
+INTEGER                  :: iElem,ElemToBGM(1:6,1:PP_N)
 INTEGER,ALLOCATABLE      :: HaloElemToBGM(:,:)
 REAL,ALLOCATABLE         :: SideOrigin(:,:), SideRadius(:) 
 !=================================================================================================================================
@@ -1123,30 +1358,30 @@ GEO%FIBGMdeltas(1:3) = GETREALARRAY('Part-FIBGMdeltas',3,'1. , 1. , 1.')
 GEO%FactorFIBGM(1:3) = GETREALARRAY('Part-FactorFIBGM',3,'1. , 1. , 1.')
 GEO%FIBGMdeltas(1:3) = 1./GEO%FactorFIBGM(1:3) * GEO%FIBGMdeltas(1:3)
 
-StartT=BOLTZPLATZTIME()
+!StartT=BOLTZPLATZTIME()
 ALLOCATE(XiEtaZetaBasis(1:3,1:6,1:nTotalElems) &
         ,slenXiEtaZetaBasis(1:6,1:nTotalElems) &
         ,ElemRadiusNGeo(1:nTotalElems)         &
         ,ElemRadius2NGeo(1:nTotalElems)        )
 CALL BuildElementBasis()
-EndT=BOLTZPLATZTIME()
+!EndT=BOLTZPLATZTIME()
 IF(PartMPI%MPIROOT)THEN
   WRITE(UNIT_stdOut,'(A,F12.3,A)',ADVANCE='YES')' INIT ELEMENT-BASIS TOOK          [',EndT-StartT,'s]'
 END IF
 
 SWRITE(UNIT_StdOut,'(66("-"))')
-StartT=BOLTZPLATZTIME()
+!StartT=BOLTZPLATZTIME()
 ! get new min max
 SWRITE(UNIT_stdOut,'(A)')' Getting FIBGM-minmax ...' 
 CALL GetFIBGMminmax()
 ! sort elem in bgm cells
 SWRITE(UNIT_stdOut,'(A)')' Getting element range in FIBGM ...' 
-DO iElem=1,PP_nElems
+DO iElem=1,PP_N
   CALL BGMIndexOfElement(iElem,ElemToBGM(1:6,iElem)) 
 END DO ! iElem = nElems+1,nTotalElems
 SWRITE(UNIT_stdOut,'(A)')' Building FIBGM ...' 
 CALL GetFIBGM(ElemToBGM)
-EndT=BOLTZPLATZTIME()
+!EndT=BOLTZPLATZTIME()
 IF(PartMPI%MPIROOT)THEN
   WRITE(UNIT_stdOut,'(A,F12.3,A)',ADVANCE='YES')' Init FIBGM took                  [',EndT-StartT,'s]'
 END IF
@@ -1157,7 +1392,7 @@ CALL MarkAllBCSides()
 ! get elem and side types
 CALL GetElemAndSideType() ! normally called AFTER reshape
 
-StartT=BOLTZPLATZTIME()
+!StartT=BOLTZPLATZTIME()
 #ifdef MPI
 SWRITE(UNIT_stdOut,'(A)')' INIT HALO REGION...' 
 !CALL Initialize()  ! Initialize parallel environment for particle exchange between MPI domains
@@ -1167,9 +1402,9 @@ CALL InitHaloMesh()
 ! rebuild is a local operation
 #endif /*MPI*/
 
-IF(nTotalElems.GT.PP_nElems)THEN
-  ALLOCATE(HaloElemToBGM(1:6,PP_nElems+1:nTotalElems))
-  DO iElem=PP_nElems+1,nTotalElems
+IF(nTotalElems.GT.PP_N)THEN
+  ALLOCATE(HaloElemToBGM(1:6,PP_N+1:nTotalElems))
+  DO iElem=PP_N+1,nTotalElems
     CALL BGMIndexOfElement(iElem,HaloElemToBGM(1:6,iElem)) 
   END DO ! iElem = nElems+1,nTotalElems
   CALL AddHALOCellsToFIBGM(ElemToBGM,HaloElemToBGM)
@@ -1178,7 +1413,7 @@ ELSE
   CALL AddHALOCellsToFIBGM(ElemToBGM)
 END IF
 
-EndT=BOLTZPLATZTIME()
+!EndT=BOLTZPLATZTIME()
 IF(PartMPI%MPIROOT)THEN
    WRITE(UNIT_stdOut,'(A,F8.3,A)',ADVANCE='YES')' Construction of halo region took [',EndT-StartT,'s]'
 END IF
@@ -1239,7 +1474,8 @@ USE MOD_Particle_MPI_Vars,                  ONLY:SafetyFactor,halo_eps_velo,halo
 #ifndef PP_HDG
 USE MOD_CalcTimeStep,                       ONLY:CalcTimeStep
 #endif /*PP_HDG*/
-USE MOD_Equation_Vars,                      ONLY:c
+! partns
+! USE MOD_Equation_Vars,                      ONLY:c
 USE MOD_Particle_Vars,                      ONLY:manualtimestep
 #if (PP_TimeDiscMethod==201)
 USE MOD_Particle_Vars,                      ONLY:dt_part_ratio
@@ -1255,13 +1491,14 @@ USE MOD_Particle_Mesh_Vars,                 ONLY:NbrOfCases,casematrix
 #if (PP_TimeDiscMethod==501) || (PP_TimeDiscMethod==502) || (PP_TimeDiscMethod==506)
 USE MOD_TimeDisc_Vars,                      ONLY: RK_c,nRKStages
 #endif
+USE MOD_EOS_Vars,                           ONLY:mu0
 
 ! IMPLICIT VARIABLE HANDLING
  IMPLICIT NONE
 !-----------------------------------------------------------------------------------------------------------------------------------
 ! INPUT VARIABLES
 !INTEGER,INTENT(IN)    :: mode
-INTEGER,INTENT(IN)     :: ElemToBGM(1:6,1:PP_nElems)
+INTEGER,INTENT(IN)     :: ElemToBGM(1:6,1:PP_N)
 !-----------------------------------------------------------------------------------------------------------------------------------
 ! OUTPUT VARIABLES
 !-----------------------------------------------------------------------------------------------------------------------------------
@@ -1297,6 +1534,10 @@ INTEGER                          :: j_offset
 #if (PP_TimeDiscMethod==501) || (PP_TimeDiscMethod==502) || (PP_TimeDiscMethod==506)
 INTEGER                          :: iStage
 #endif
+
+! partns
+INTEGER                          :: dummy_errtype
+REAL                             :: c
 !===================================================================================================================================
 
 ! zeros
@@ -1365,7 +1606,7 @@ BGMkmin = INT((GEO%zmin-GEO%zminglob)/GEO%FIBGMdeltas(3))-1
 !        c*dt*SafetyFactor+r_cutoff
 IF (ManualTimeStep.EQ.0.0) THEN
 #ifndef PP_HDG
-  deltaT=CALCTIMESTEP()
+  deltaT=CALCTIMESTEP(dummy_errtype)
 #else
    CALL abort(&
 __STAMP__&
@@ -1374,6 +1615,8 @@ __STAMP__&
 ELSE
   deltaT=ManualTimeStep
 END IF
+! partns
+c = 1./SQRT(epsMach*mu0)
 IF (halo_eps_velo.EQ.0) halo_eps_velo = c
 #if (PP_TimeDiscMethod==4 || PP_TimeDiscMethod==200 || PP_TimeDiscMethod==42 || PP_TimeDiscMethod==1000)
 IF (halo_eps_velo.EQ.c) THEN
@@ -1461,7 +1704,7 @@ DO kBGM = BGMkmin,BGMkmax
 END DO
 
 !--- compute number of elements in each background cell
-DO iElem=1,PP_nElems
+DO iElem=1,PP_N
   ! here fancy stuff, because element could be wide out of element range
   BGMCellXmin = ElemToBGM(1,iElem)
   BGMCellXmax = ElemToBGM(2,iElem)
@@ -1491,7 +1734,7 @@ DO kBGM = BGMkmin,BGMkmax
 END DO ! iBGM
 
 !--- map elements to background cells
-DO iElem=1,PP_nElems
+DO iElem=1,PP_N
   ! here fancy stuff, because element could be wide out of element range
   BGMCellXmin = ElemToBGM(1,iElem)
   BGMCellXmax = ElemToBGM(2,iElem)
@@ -1975,8 +2218,8 @@ USE MOD_Particle_Tracking_Vars,             ONLY:Distance,ListDistance
 !-----------------------------------------------------------------------------------------------------------------------------------
 ! INPUT VARIABLES
 !INTEGER,INTENT(IN)    :: mode
-INTEGER,INTENT(IN)               :: ElemToBGM(1:6,1:PP_nElems)
-INTEGER,INTENT(IN),OPTIONAL      :: HaloElemToBGM(1:6,PP_nElems+1:nTotalElems)
+INTEGER,INTENT(IN)               :: ElemToBGM(1:6,1:PP_N)
+INTEGER,INTENT(IN),OPTIONAL      :: HaloElemToBGM(1:6,PP_N+1:nTotalElems)
 !-----------------------------------------------------------------------------------------------------------------------------------
 ! OUTPUT VARIABLES
 !-----------------------------------------------------------------------------------------------------------------------------------
@@ -2016,7 +2259,7 @@ BGMCellZmin = BGMkmin
 
 
 DO iElem=1,nTotalElems
-  IF(iElem.LE.PP_nElems)THEN
+  IF(iElem.LE.PP_N)THEN
     BGMCellXmin = ElemToBGM(1,iElem)
     BGMCellXmax = ElemToBGM(2,iElem)
     BGMCellYmin = ElemToBGM(3,iElem)
@@ -2069,7 +2312,7 @@ END DO ! iBGM
 
 
 !--- compute number of elements in each background cell
-DO iElem=1,PP_nElems
+DO iElem=1,PP_N
   !--- find minimum and maximum BGM cell for current element
   ! here fancy stuff, because element could be wide out of element range
   BGMCellXmin = MIN(MAX(ElemToBGM(1,iElem),BGMimin),BGMimax)
@@ -2089,7 +2332,7 @@ DO iElem=1,PP_nElems
   END DO ! iBGM
 END DO ! iElem
 
-DO iElem=PP_nElems+1,nTotalElems
+DO iElem=PP_N+1,nTotalElems
   !--- find minimum and maximum BGM cell for current element
   ! here fancy stuff, because element could be wide out of element range
   BGMCellXmin = MIN(MAX(HaloElemToBGM(1,iElem),BGMimin),BGMimax)
@@ -2122,7 +2365,7 @@ DO kBGM = BGMkmin,BGMkmax
 END DO ! iBGM
 
 !--- map elements to background cells
-DO iElem=1,PP_nElems
+DO iElem=1,PP_N
   !--- find minimum and maximum BGM cell for current element
   ! here fancy stuff, because element could be wide out of element range
   BGMCellXmin = MIN(MAX(ElemToBGM(1,iElem),BGMimin),BGMimax)
@@ -2142,7 +2385,7 @@ DO iElem=1,PP_nElems
     END DO ! jBGM
   END DO ! iBGM
 END DO ! iElem
-DO iElem=PP_nElems+1,nTotalElems
+DO iElem=PP_N+1,nTotalElems
   !--- find minimum and maximum BGM cell for current element
   ! here fancy stuff, because element could be wide out of element range
   BGMCellXmin = MIN(MAX(HaloElemToBGM(1,iElem),BGMimin),BGMimax)
@@ -2164,7 +2407,7 @@ DO iElem=PP_nElems+1,nTotalElems
 END DO ! iElem
 
 
-DO iElem=1,PP_nElems
+DO iElem=1,PP_N
   IF(.NOT.ElementFound(iElem))THEN
     !--- find minimum and maximum BGM cell for current element
     ! here fancy stuff, because element could be wide out of element range
@@ -2195,7 +2438,7 @@ __STAMP__&
   END IF
 END DO ! iElem
 
-DO iElem=PP_nElems+1,nTotalElems
+DO iElem=PP_N+1,nTotalElems
   IF(.NOT.ElementFound(iElem))THEN
     !--- find minimum and maximum BGM cell for current element
     ! here fancy stuff, because element could be wide out of element range
@@ -2433,7 +2676,7 @@ __STAMP__&
 END IF
 DO iElem=1,nElems
   !--- Calculate and save volume of element iElem
-  J_N(1,0:PP_N,0:PP_N,0:PP_N)=1./sJ(:,:,:,iElem)
+  J_N(1,0:PP_N,0:PP_N,0:PP_N)=1./sJ(:,:,:,iElem,0)
   GEO%Volume(iElem) = 0.
   DO k=0,PP_N; DO j=0,PP_N; DO i=0,PP_N
     GEO%Volume(iElem) = GEO%Volume(iElem) + wGP(i)*wGP(j)*wGP(k)*J_N(1,i,j,k)
@@ -2668,7 +2911,7 @@ SUBROUTINE MapRegionToElem()
 USE MOD_Globals
 USE MOD_Preproc
 USE MOD_Particle_Mesh_Vars,     ONLY:NbrOfRegions, RegionBounds,GEO
-USE MOD_Mesh_Vars,              ONLY:ElemBaryNGeo
+USE MOD_Particle_Mesh_Vars,     ONLY:ElemBaryNGeo
 !----------------------------------------------------------------------------------------------------------------------------------!
 IMPLICIT NONE
 ! INPUT VARIABLES 
@@ -2679,10 +2922,10 @@ IMPLICIT NONE
  INTEGER                :: iElem, iRegions
 !===================================================================================================================================
 SDEALLOCATE(GEO%ElemToRegion)
-ALLOCATE(GEO%ElemToRegion(1:PP_nElems)) 
+ALLOCATE(GEO%ElemToRegion(1:PP_N)) 
 GEO%ElemToRegion=0
 
-DO iElem=1,PP_nElems
+DO iElem=1,PP_N
   DO iRegions=1,NbrOfRegions
     IF ((ElemBaryNGeo(1,iElem).LT.RegionBounds(1,iRegions)).OR.(ElemBaryNGEO(1,iElem).GE.RegionBounds(2,iRegions))) CYCLE
     IF ((ElemBaryNGeo(2,iElem).LT.RegionBounds(3,iRegions)).OR.(ElemBaryNGEO(2,iElem).GE.RegionBounds(4,iRegions))) CYCLE
@@ -2695,7 +2938,7 @@ __STAMP__&
 ,'Defined regions are overlapping')
     END IF
   END DO ! iRegions=1,NbrOfRegions
-END DO ! iElem=1,PP_nElems
+END DO ! iElem=1,PP_N
 
 
 END SUBROUTINE MapRegionToElem
@@ -2709,13 +2952,14 @@ SUBROUTINE PointToExactElement(X_In,Element,isInSide,doHalo)
 !===================================================================================================================================
 ! MODULES
 USE MOD_Globals
+USE MOD_Particle_Globals
 USE MOD_Preproc
 USE MOD_Particle_Mesh_Vars,     ONLY:Geo
 USE MOD_Particle_Mesh_Vars,     ONLY:epsOneCell
 USE MOD_Particle_Tracking_Vars, ONLY:ListDistance,Distance
 USE MOD_Eval_xyz,               ONLY:eval_xyz_elemcheck
-USE MOD_Utils,                  ONLY:InsertionSort !BubbleSortID
-USE MOD_Mesh_Vars,              ONLY:ElemBaryNGeo
+USE MOD_Particle_Utils,         ONLY:InsertionSort !BubbleSortID
+USE MOD_Particle_Mesh_Vars,     ONLY:ElemBaryNGeo
 ! IMPLICIT VARIABLE HANDLING
 IMPLICIT NONE                                                                                   
 !-----------------------------------------------------------------------------------------------------------------------------------
@@ -2777,7 +3021,7 @@ Element=-1
 DO iBGMElem=1,nBGMElems
   ElemID=ListDistance(iBGMElem)
   IF(.NOT.DoHALO)THEN
-    IF(ElemID.GT.PP_nElems) CYCLE
+    IF(ElemID.GT.PP_N) CYCLE
   END IF
   CALL Eval_xyz_elemcheck(X_in(1:3),xi,ElemID)
   IF(ALL(ABS(Xi).LE.epsOneCell(ElemID))) THEN ! particle inside
@@ -2798,11 +3042,12 @@ SUBROUTINE BuildElementBasis()
 !================================================================================================================================
 USE MOD_Globals!,                  ONLY:CROSS
 USE MOD_Preproc
-USE MOD_Mesh_Vars,                ONLY:NGeo,XCL_NGeo,wBaryCL_NGeo,XiCL_NGeo
+USE MOD_Mesh_Vars,                ONLY:NGeo
+USE MOD_Particle_Mesh_Vars,       ONLY:XCL_NGeo,wBaryCL_NGeo,XiCL_NGeo
 USE MOD_Particle_Surfaces_Vars,   ONLY:BezierControlPoints3D
-USE MOD_Basis,                    ONLY:DeCasteljauInterpolation
+USE MOD_Particle_Basis,           ONLY:DeCasteljauInterpolation
 USE MOD_Particle_Mesh_Vars,       ONLY:XiEtaZetaBasis,slenXiEtaZetaBasis,ElemRadiusNGeo,ElemRadius2NGeo
-USE MOD_Mesh_Vars,                ONLY:ElemBaryNgeo
+USE MOD_Particle_Mesh_Vars,       ONLY:ElemBaryNgeo
 USE MOD_Particle_Tracking_Vars,   ONLY:DoRefMapping
 USE MOD_Particle_Mesh_Vars,       ONLY:nTotalElems,PartElemToSide
 USE MOD_Basis,                    ONLY:LagrangeInterpolationPolys
@@ -2825,7 +3070,7 @@ ElemRadiusNGeo=0.
 ElemRadius2NGeo=0.
 DO iElem=1,nTotalElems
   ! get point on each side 
-  IF((iElem.LE.PP_nElems).OR.(DoRefMapping))THEN
+  IF((iElem.LE.PP_N).OR.(DoRefMapping))THEN
     ! xi plus
     Xi=(/1.0,0.0,0.0/)
     CALL LagrangeInterpolationPolys(Xi(1),NGeo,XiCL_NGeo,wBaryCL_NGeo,Lag(1,:))
@@ -2951,7 +3196,7 @@ DO iElem=1,nTotalElems
       END DO !j=0,NGeo
     END DO !k=0,NGeo
   ELSE
-    IF(iElem.GT.PP_nElems) CYCLE
+    IF(iElem.GT.PP_N) CYCLE
     DO ilocSide=1,6
       SideID=PartElemToSide(E2S_SIDE_ID,ilocSide,iElem)
       IF(SideID.EQ.-1) CYCLE
@@ -2975,13 +3220,13 @@ DO iElem=1,nTotalElems
 END DO ! iElem
 
 IF (TRIM(DepositionType).EQ.'shape_function_simple')THEN
-  ALLOCATE(ElemRadius2_sf(1:PP_nElems),STAT=ALLOCSTAT)
+  ALLOCATE(ElemRadius2_sf(1:PP_N),STAT=ALLOCSTAT)
   IF (ALLOCSTAT.NE.0) CALL abort(&
 __STAMP__ &
 ,' Cannot allocate ElemRadius2_sf!')
-  DO iElem=1,PP_nElems
+  DO iElem=1,PP_N
     ElemRadius2_sf(iElem)=(ElemRadiusNGeo(iElem)+r_sf)*(ElemRadiusNGeo(iElem)+r_sf)
-  END DO ! iElem=1,PP_nElems
+  END DO ! iElem=1,PP_N
 END IF
 
 
@@ -2997,7 +3242,7 @@ SUBROUTINE MapElemToFIBGM()
 USE MOD_Globals
 USE MOD_Preproc
 USE MOD_Particle_Mesh_Vars,     ONLY:GEO,nTotalElems
-USE MOD_Mesh_Vars,              ONLY:XCL_NGeo
+USE MOD_Particle_Mesh_Vars,     ONLY:XCL_NGeo
 USE MOD_Particle_Tracking_Vars, ONLY:DoRefMapping
 !----------------------------------------------------------------------------------------------------------------------------------!
 ! insert modules here
@@ -3019,7 +3264,7 @@ INTEGER           :: BGMCellXmax,BGMCellXmin,BGMCellYmax,BGMCellYmin,BGMCellZmax
 IF(DoRefMapping) THEN
   LastElem=nTotalElems
 ELSE
-  LastElem=PP_nElems
+  LastElem=PP_N
 END IF
 
 ALLOCATE(GEO%ElemToFIBGM(1:6,1:LastElem),STAT=ALLOCSTAT )
@@ -3111,7 +3356,7 @@ INTEGER           :: iPart, ElemID
 DO iPart=1,PDM%ParticleVecLength
   IF(PDM%ParticleInside(iPart))THEN
     ElemID = PEM%Element(iPart)
-    IF(ElemID.LE.PP_nElems)THEN
+    IF(ElemID.LE.PP_N)THEN
       nPartsPerElem(ElemID)=nPartsPerElem(ElemID)+1
     END IF
   END IF
@@ -3126,7 +3371,8 @@ SUBROUTINE CheckIfCurvedElem(IsCurved,XCL_NGeo)
 !===================================================================================================================================
 ! MODULES                                                                                                                          !
 !----------------------------------------------------------------------------------------------------------------------------------!
-USE MOD_Mesh_Vars,             ONLY:NGeo,Vdm_CLNGeo1_CLNGeo
+USE MOD_Mesh_Vars,             ONLY:NGeo
+USE MOD_Particle_Mesh_Vars,    ONLY:Vdm_CLNGeo1_CLNGeo
 USE MOD_ChangeBasis,           ONLY:changeBasis3D
 !----------------------------------------------------------------------------------------------------------------------------------!
 ! IMPLICIT VARIABLE HANDLING
@@ -3221,12 +3467,12 @@ IMPLICIT NONE
 ! LOCAL VARIABLES
 !===================================================================================================================================
 
-#ifdef PARTICLES
+!#ifdef FLEXI_PARTICLES
 #ifdef MPI
 ! first communicate the bezierControlPoints (slave information is missing)
 CALL ExchangeBezierControlPoints3D()
 #endif /*MPI*/
-#endif /*PARTICLES*/
+!#endif /*PARTICLES*/
 
 END SUBROUTINE InitElemBoundingBox
 
@@ -3286,12 +3532,15 @@ SUBROUTINE GetElemAndSideType()
 !----------------------------------------------------------------------------------------------------------------------------------!
 USE MOD_Globals
 USE MOD_Preproc
+USE MOD_Mesh_Vars
+USE MOD_Particle_Globals
+USE MOD_Particle_Mesh_Vars
 USE MOD_Particle_Tracking_Vars,             ONLY:DoRefMapping
 USE MOD_Particle_Surfaces_Vars,             ONLY:BezierControlPoints3D,BoundingBoxIsEmpty,SideType,SideNormVec,SideDistance
 USE MOD_Particle_Mesh_Vars,                 ONLY:nTotalSides,nTotalElems,SidePeriodicType
 USE MOD_Particle_Mesh_Vars,                 ONLY:ElemType,nPartSides
-USE MOD_Mesh_Vars,                          ONLY:CurvedElem,XCL_NGeo,Vdm_CLNGeo1_CLNGeo,BC,NGeo,Vdm_CLNGeo1_CLNGeo,nSides,ElemBaryNGeo
-USE MOD_Particle_Mesh_Vars,                 ONLY:PartElemToSide,PartBCSideList,nTotalBCSides,GEO
+USE MOD_Particle_Mesh_Vars,                 ONLY:XCL_NGeo,Vdm_CLNGeo1_CLNGeo,Vdm_CLNGeo1_CLNGeo,ElemBaryNGeo,CurvedElem!,BC
+!USE MOD_Particle_Mesh_Vars,                 ONLY:PartElemToSide,PartBCSideList,nTotalBCSides,GEO
 USE MOD_ChangeBasis,                        ONLY:changeBasis3D
 !----------------------------------------------------------------------------------------------------------------------------------!
 IMPLICIT NONE
@@ -3418,18 +3667,19 @@ DO iElem=1,nTotalElems
           IF(.NOT.ALMOSTZERO(DOT_PRODUCT(v1,v2))) isRectangular=.FALSE.
           IF(.NOT.ALMOSTZERO(DOT_PRODUCT(v1,v3))) isRectangular=.FALSE.
         END IF
-        IF(isRectangular)THEN
-          SideType(TrueSideID)=PLANAR_RECT
-        ELSE
-          SideType(TrueSideID)=PLANAR_NONRECT
-        END IF
+        ! partns
+!        IF(isRectangular)THEN
+!          SideType(TrueSideID)=PLANAR_RECT
+!        ELSE
+!          SideType(TrueSideID)=PLANAR_NONRECT
+!        END IF
       ELSE
         v1=(-BezierControlPoints3D(:,0,0   ,SideID)+BezierControlPoints3D(:,NGeo,0   ,SideID)   &
             -BezierControlPoints3D(:,0,NGeo,SideID)+BezierControlPoints3D(:,NGeo,NGeo,SideID) )
         v2=(-BezierControlPoints3D(:,0,0   ,SideID)-BezierControlPoints3D(:,NGeo,0   ,SideID)   &
             +BezierControlPoints3D(:,0,NGeo,SideID)+BezierControlPoints3D(:,NGeo,NGeo,SideID) )
         SideNormVec(:,TrueSideID) = CROSSNORM(v1,v2) !non-oriented, averaged normal vector based on all four edges
-        SideType(TrueSideID)=BILINEAR
+!        SideType(TrueSideID)=BILINEAR
       END IF
     ELSE
       ! possible curved face
@@ -3456,7 +3706,8 @@ DO iElem=1,nTotalElems
       CALL PointsEqual(NGeo2,XCL_NGeoSideNew,XCL_NGeoSideOld,isCurvedSide)
       IF(isCurvedSide)THEn
         IF(BoundingBoxIsEmpty(SideID))THEN
-          SideType(TrueSideID)=PLANAR_CURVED
+            ! partns
+!          SideType(TrueSideID)=PLANAR_CURVED
           v1=(-BezierControlPoints3D(:,0,0   ,SideID)+BezierControlPoints3D(:,NGeo,0   ,SideID)   &
               -BezierControlPoints3D(:,0,NGeo,SideID)+BezierControlPoints3D(:,NGeo,NGeo,SideID) )
           
@@ -3527,7 +3778,8 @@ DO iElem=1,nTotalElems
           v2=(-BezierControlPoints3D(:,0,0   ,SideID)-BezierControlPoints3D(:,NGeo,0   ,SideID)   &
               +BezierControlPoints3D(:,0,NGeo,SideID)+BezierControlPoints3D(:,NGeo,NGeo,SideID) )
           SideNormVec(:,TrueSideID) = CROSSNORM(v1,v2) !non-oriented, averaged normal vector based on all four edges
-          SideType(TrueSideID)=BILINEAR
+          ! partns
+!          SideType(TrueSideID)=BILINEAR
         END IF
       END IF
     END IF
@@ -3589,7 +3841,8 @@ USE MOD_Globals
 USE MOD_Preproc
 USE MOD_IO_HDF5,                            ONLY:AddToElemData,ElementOut
 USE MOD_Particle_Tracking_Vars,             ONLY:DoRefMapping
-USE MOD_Mesh_Vars,                          ONLY:XCL_NGeo,nSides,NGeo,nBCSides,sJ,BC,nElems
+USE MOD_Mesh_Vars,                          ONLY:nSides,NGeo,nBCSides,sJ,BC,nElems
+USE MOD_Particle_Mesh_Vars,                 ONLY:XCL_NGeo
 USE MOD_Particle_Surfaces_Vars,             ONLY:BezierControlPoints3D
 USE MOD_Particle_Mesh_Vars,                 ONLY:nTotalSides,IsBCElem,nTotalElems,nTotalBCElems
 USE MOD_Particle_Mesh_Vars,                 ONLY:PartElemToSide,BCElem,PartSideToElem,PartBCSideList,GEO
@@ -3863,18 +4116,18 @@ CALL AddToElemData(ElementOut,'isBCElem',LogArray=isBCElem(1:nElems))
 IF(DoRefMapping)THEN
   ALLOCATE(epsOneCell(1:nTotalElems))
 ELSE
-  ALLOCATE(epsOneCell(1:PP_nElems))
+  ALLOCATE(epsOneCell(1:PP_N))
 END IF
 
 nLoop=nTotalElems
-IF(.NOT.DoRefMapping) nLoop=PP_nElems
+IF(.NOT.DoRefMapping) nLoop=PP_N
 maxScaleJ=0.
-DO iElem=1,PP_nElems
-  scaleJ=MAXVAL(sJ(:,:,:,iElem))/MINVAL(sJ(:,:,:,iElem))
+DO iElem=1,PP_N
+  scaleJ=MAXVAL(sJ(:,:,:,iElem,0))/MINVAL(sJ(:,:,:,iElem,0))
   epsOneCell(iElem)=1.0+SQRT(3.0*scaleJ*RefMappingEps)
   maxScaleJ=MAX(scaleJ,maxScaleJ)
 END DO ! iElem=1,nLoop
-DO iElem=PP_nElems+1,nLoop
+DO iElem=PP_N+1,nLoop
   epsOneCell(iElem)=1.0+SQRT(maxScaleJ*RefMappingEps)
 END DO ! iElem=1,nLoop
 CALL AddToElemData(ElementOut,'epsOneCell',RealArray=epsOneCell(1:nElems))
@@ -3891,7 +4144,8 @@ SUBROUTINE CalcElemAndSideNum()
 USE MOD_Globals
 USE MOD_Preproc
 USE MOD_Particle_Tracking_Vars,             ONLY:DoRefMapping
-USE MOD_Mesh_Vars,                          ONLY:CurvedElem,nGlobalElems
+USE MOD_Mesh_Vars,                          ONLY:nGlobalElems
+USE MOD_Particle_Mesh_Vars,                 ONLY:CurvedElem
 USE MOD_Particle_Surfaces_Vars,             ONLY:SideType
 USE MOD_Particle_Mesh_Vars,                 ONLY:nTotalSides,IsBCElem,nTotalElems
 USE MOD_Particle_Mesh_Vars,                 ONLY:nPartSides
@@ -3941,7 +4195,7 @@ nBCElemsHalo               = 0
 
 DO iElem=1,nTotalElems
   ! count elements by type and in own and halo region
-  IF(iElem.LE.PP_nElems)THEN
+  IF(iElem.LE.PP_N)THEN
     IF(CurvedElem(iElem))THEN
       nCurvedElems=nCurvedElems+1
     ELSE
@@ -4053,6 +4307,7 @@ SUBROUTINE GetLinearSideBaseVectors()
 ! MODULES                                                                                                                          !
 !----------------------------------------------------------------------------------------------------------------------------------!
 USE MOD_Globals
+USE MOD_Particle_Globals
 USE MOD_Preproc
 USE MOD_Particle_Tracking_Vars,        ONLY:DoRefMapping
 USE MOD_Mesh_Vars,                     ONLY:NGeo
@@ -4061,8 +4316,8 @@ USE MOD_Particle_Surfaces_Vars,        ONLY:BaseVectors0,BaseVectors1,BaseVector
 !USE MOD_Particle_Surfaces_Vars,        ONLY:BaseVectors0flip,BaseVectors1flip,BaseVectors2flip,BaseVectors3flip
 ! USE MOD_Particle_Surfaces_Vars,        ONLY:SideID2PlanarSideID
 ! USE MOD_Particle_Surfaces_Vars,        ONLY:SideType
-USE MOD_Particle_Mesh_Vars,            ONLY:nTotalSides,nTotalBCSides
-USE MOD_Particle_Mesh_Vars,            ONLY:PartBCSideList
+USE MOD_Particle_Mesh_Vars,            !ONLY:nTotalSides,nTotalBCSides
+!USE MOD_Particle_Mesh_Vars,            ONLY:PartBCSideList
 !----------------------------------------------------------------------------------------------------------------------------------!
 IMPLICIT NONE
 ! INPUT VARIABLES 
@@ -4154,9 +4409,10 @@ SUBROUTINE ElemConnectivity()
 !===================================================================================================================================
 ! MODULES                                                                                                                          !
 USE MOD_Globals
+USE MOD_Particle_Globals
 USE MOD_Preproc
-USE MOD_Particle_Mesh_Vars,  ONLY:PartElemToElemGlob, PartElemToElemAndSide,nTotalElems,PartElemToSide,PartBCSideList &
-                                 ,SidePeriodicType,nPartSides,nTotalSides
+USE MOD_Particle_Mesh_Vars!,  ONLY:PartElemToElemGlob, PartElemToElemAndSide,nTotalElems,PartElemToSide,PartBCSideList &
+!                                 ,SidePeriodicType,nPartSides,nTotalSides
 USE MOD_Particle_MPI_Vars,   ONLY:PartHaloElemToProc
 USE MOD_Mesh_Vars,           ONLY:OffSetElem,BC,BoundaryType,MortarType
 USE MOD_Particle_Surfaces_Vars, ONLY:SideNormVec
@@ -4205,13 +4461,13 @@ DO iElem=1,nTotalElems
       GlobalElemID=PartElemToElemGlob(iMortar,ilocSide,iElem)
       IF(GlobalElemID.LE.0) CYCLE
       ! check if the element is in MY range of elements
-      IF((GlobalElemID.GE.OffSetElem+1).AND.(GlobalElemID.LE.(OffSetElem+PP_nElems)))THEN
+      IF((GlobalElemID.GE.OffSetElem+1).AND.(GlobalElemID.LE.(OffSetElem+PP_N)))THEN
         PartElemToElemAndSide(iMortar,ilocSide,iElem)=INT(GlobalElemID-OffSetElem,4)
         CYCLE
       END IF
 #ifdef MPI
       ! neighbor element not found, hence, it can be a halo element
-      DO iHaloElem=PP_nElems+1,nTotalElems
+      DO iHaloElem=PP_N+1,nTotalElems
         ProcID=PartHaloElemToProc(NATIVE_PROC_ID,iHaloElem)
         HaloGlobalElemID=offSetElemMPI(ProcID) + PartHaloElemToProc(NATIVE_ELEM_ID,iHaloElem)
         CHECKSAFEINT(HaloGlobalElemID,4)
@@ -4223,7 +4479,7 @@ DO iElem=1,nTotalElems
 #endif /*MPI*/
     END DO ! iMortar=1,4
   END DO ! ilocSide=1,6
-END DO ! iElem=1,PP_nElems
+END DO ! iElem=1,PP_N
 
 ! which local side of neighbor element is connected to MY element
 DO iElem=1,nTotalElems
@@ -4338,7 +4594,7 @@ __STAMP__&
       END DO ! iMortar=1,4
     END IF ! periodic sides
   END DO ! ilocSide=1,6
-END DO ! iElem=1,PP_nElems
+END DO ! iElem=1,PP_N
 
 ! sanity check
 DO iElem=1,nTotalElems
@@ -4405,13 +4661,17 @@ SUBROUTINE DuplicateSlavePeriodicSides()
 ! periodic sides are unique for the DG operator and duplicated for the particle tracking
 !===================================================================================================================================
 ! MODULES                                                                                                                          !
-USE  MOD_GLobals
-USE MOD_Mesh_Vars,               ONLY:MortarType,BC,NGeo,nBCs,nSides,BoundaryType,MortarSlave2MasterInfo,nElems,XCL_NGeo
+USE MOD_GLobals
+USE MOD_Particle_Globals
+USE MOD_Particle_Mesh_Vars,      ONLY:MortarSlave2MasterInfo
+USE MOD_Particle_Mesh_Vars,       ONLY: NGeoElevated
+USE MOD_Mesh_Vars,               ONLY:MortarType,BC,NGeo,nBCs,nSides,BoundaryType,nElems
+USE MOD_Particle_Mesh_Vars,      ONLY:XCL_NGeo
 USE MOD_Particle_Mesh_Vars,      ONLY:PartElemToSide,PartSideToElem,nTotalSides,SidePeriodicType,nPartPeriodicSides,GEO &
                                      ,nTotalBCSides,nPartSides
 USE MOD_Particle_Surfaces_Vars,  ONLY:BezierControlPoints3D
-USE MOD_Mesh_Vars,               ONLY:NGeoElevated
-USE MOD_Particle_Surfaces,       ONLY:GetSideSlabNormalsAndIntervals,RotateMasterToSlave,GetBezierControlPoints3D
+!USE MOD_Mesh_Vars,               ONLY:NGeoElevated
+USE MOD_Particle_Surfaces,       ONLY:RotateMasterToSlave,GetBezierControlPoints3D,GetSideSlabNormalsAndIntervals
 USE MOD_Particle_Surfaces_vars,  ONLY:BezierControlPoints3D,SideSlabIntervals,BezierControlPoints3DElevated &
                                         ,SideSlabIntervals,SideSlabNormals,BoundingBoxIsEmpty
 USE MOD_Particle_Tracking_Vars,  ONLY:CartesianPeriodic
@@ -4480,7 +4740,7 @@ IF(MapPeriodicSides)THEN
   MinMaxGlob(6)=GEO%zmaxglob
 
   ALLOCATE(DummyBezierControlPoints3d(1:3,0:NGeo,0:NGeo,1:nTotalSides))
-  ALLOCATE(DummyBezierControlPoints3dElevated(1:3,0:NGeoElevated,0:NGeoElevated,1:nTotalSides))
+   ALLOCATE(DummyBezierControlPoints3dElevated(1:3,0:NGeoElevated,0:NGeoElevated,1:nTotalSides))
   ALLOCATE(DummySideSlabNormals(1:3,1:3,1:nTotalSides))
   ALLOCATE(DummySideSlabIntervals(1:6,1:nTotalSides))
   !ALLOCATE(DummySidePeriodicDisplacement(1:3,1:nTotalSides))
@@ -4530,7 +4790,7 @@ IF(MapPeriodicSides)THEN
   ALLOCATE(PartSideToElem(1:5,1:nTotalSides))
   ALLOCATE(SidePeriodicType(1:nTotalSides))
   PartSideToElem=-1
-  !ALLOCATE(SidePeriodicDisplacement(1:3,1:nTotalSides))
+!  ALLOCATE(SidePeriodicDisplacement(1:3,1:nTotalSides))
 
   BezierControlPoints3d(1:3,0:NGeo,0:NGeo,1:tmpnSides) = DummyBezierControlPoints3d(1:3,0:NGeo,0:NGeo,1:tmpnSides)
   BezierControlPoints3dElevated(1:3,0:NGeoElevated,0:NGeoElevated,1:tmpnSides) &
@@ -4538,7 +4798,7 @@ IF(MapPeriodicSides)THEN
   SideSlabNormals(1:3,1:3,1:tmpnSides)                 = DummySideSlabNormals(1:3,1:3,1:tmpnSides)
   SideSlabIntervals(1:6,1:tmpnSides)                   = DummySideSlabIntervals(1:6,1:tmpnSides)
   BoundingBoxIsEmpty(1:tmpnSides)                      = DummyBoundingBoxIsEmpty(1:tmpnSides)
-  !SidePeriodicDisplacement(1:3,1:nTotalSides)          = DummySidePeriodicDisplacement(1:3,1:nTotalSides)
+!  SidePeriodicDisplacement(1:3,1:nTotalSides)          = DummySidePeriodicDisplacement(1:3,1:nTotalSides)
   BC(1:tmpnSides)                                      = DummyBC(1:tmpnSides)
   MortarSlave2MasterInfo(1:tmpnSides)                  = DummyMortarSlave2MasterInfo(1:tmpnSides)
   MortarType(1:2,1:tmpnSides)                          = DummyMortarType(1:2,1:tmpnSides)
@@ -4661,7 +4921,7 @@ __STAMP__&
       END IF
     END IF
   END DO
-END DO ! iElem=1,PP_nElems
+END DO ! iElem=1,PP_N
 
 #ifdef MPI
 CALL MPI_BARRIER(MPI_COMM_WORLD,iERROR)
@@ -4729,7 +4989,7 @@ SUBROUTINE BGMIndexOfElement(ElemID,ElemToBGM)
 USE MOD_ChangeBasis,                        ONLY:ChangeBasis2D
 USE MOD_Particle_Surfaces_Vars,             ONLY:BezierControlPoints3D,sVdm_Bezier
 USE MOD_Particle_Surfaces_Vars,             ONLY:sVdm_Bezier
-USE MOD_Mesh_Vars,                          ONLY:XCL_NGeo
+USE MOD_Particle_Mesh_Vars,                 ONLY:XCL_NGeo
 USE MOD_Mesh_Vars,                          ONLY:NGeo
 USE MOD_Particle_Mesh_Vars,                 ONLY:GEO
 USE MOD_Particle_Tracking_Vars,             ONLY:DoRefMapping
@@ -4824,8 +5084,8 @@ SUBROUTINE GetFIBGMMinMax()
 ! MODULES                                                                                                                          !
 !----------------------------------------------------------------------------------------------------------------------------------!
 USE MOD_Globals
-USE MOD_Particle_Mesh_Vars,                 ONLY:GEO
-USE MOD_Mesh_Vars,                          ONLY:MortarSlave2MasterInfo
+USE MOD_Particle_Globals
+USE MOD_Particle_Mesh_Vars,                 ONLY:MortarSlave2MasterInfo
 USE MOD_Particle_Mesh_Vars,                 ONLY:GEO,nTotalSides
 USE MOD_Particle_Surfaces_Vars,             ONLY:BezierControlPoints3D
 #ifdef MPI
@@ -4913,7 +5173,7 @@ SUBROUTINE GetSideOriginAndRadius(nTotalBCSides,SideOrigin,SideRadius)
 !----------------------------------------------------------------------------------------------------------------------------------!
 USE MOD_Mesh_Vars,              ONLY:NGeo
 USE MOD_Particle_Mesh_Vars,     ONLY:PartBCSideList,nTotalSides
-USE MOD_Basis,                  ONLY:DeCasteljauInterpolation
+USE MOD_Particle_Basis,         ONLY:DeCasteljauInterpolation
 USE MOD_Particle_Surfaces_Vars, ONLY:BezierControlPoints3d
 !----------------------------------------------------------------------------------------------------------------------------------!
 ! IMPLICIT VARIABLE HANDLING
@@ -4961,9 +5221,9 @@ SUBROUTINE GetElemToSideDistance(nTotalBCSides,SideOrigin,SideRadius)
 ! MODULES                                                                                                                          !
 !----------------------------------------------------------------------------------------------------------------------------------!
 USE MOD_Preproc
-USE MOD_Mesh_Vars,              ONLY:ElemBaryNGeo
+USE MOD_Particle_Mesh_Vars,     ONLY:ElemBaryNGeo
 USE MOD_Particle_Mesh_Vars,     ONLY:IsBCElem,ElemRadiusNGeo,BCElem,PartBCSideList,nTotalElems
-USE MOD_Utils,                  ONLY:InsertionSort
+USE MOD_Particle_Utils,         ONLY:InsertionSort
 !----------------------------------------------------------------------------------------------------------------------------------!
 ! IMPLICIT VARIABLE HANDLING
 IMPLICIT NONE
@@ -4994,7 +5254,7 @@ DO iElem=1,nTotalElems
   END DO ! iLocSide=1,BCElem(iElem)%lastSide
   ! sort each side distance for each element according to it's distance
   CALL InsertionSort(BCElem(iElem)%ElemToSideDistance(:),BCElem(iElem)%BCSideID(:),BCElem(iElem)%lastSide)
-END DO ! iElem=1,PP_nElems
+END DO ! iElem=1,PP_N
 
 END SUBROUTINE GetElemToSideDistance
 
@@ -5007,7 +5267,8 @@ SUBROUTINE TracingElemSanity()
 USE MOD_Globals
 USE MOD_IO_HDF5,                            ONLY:AddToElemData,ElementOut
 USE MOD_Particle_Mesh_Vars,                 ONLY:isTracingTrouble,ElemTolerance
-USE MOD_Mesh_Vars,                          ONLY:nElems,ElemBaryNGeo,XCL_NGeo,NGeo
+USE MOD_Mesh_Vars,                          ONLY:nElems,NGeo
+USE MOD_Particle_Mesh_Vars,                 ONLY:ElemBaryNGeo,XCL_NGeo
 !----------------------------------------------------------------------------------------------------------------------------------!
 ! insert modules here
 !----------------------------------------------------------------------------------------------------------------------------------!

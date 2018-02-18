@@ -32,7 +32,7 @@ REAL,ALLOCATABLE,DIMENSION(:,:)         :: BaseVectors2flip             ! vector
                                                                         ! from Bezierpoints for Periodic sites(1:3,1:nBCSurfaces)
 REAL,ALLOCATABLE,DIMENSION(:,:)         :: BaseVectors3flip             ! additional vector for bilinear intersection
                                                                         ! from Bezierpoints for Periodic sites(1:3,1:nBCSurfaces)
-! INTEGER,ALLOCATABLE,DIMENSION(:)        :: SideID2PlanarSideID
+INTEGER,ALLOCATABLE,DIMENSION(:)        :: SideID2PlanarSideID
 REAL,ALLOCATABLE,DIMENSION(:,:,:,:)     :: BezierControlPoints3DElevated! Bezier basis control points of degree equal to NGeo
 REAL,ALLOCATABLE,DIMENSION(:,:)         :: ElevationMatrix              ! array for binomial coefficients used for Bezier Elevation
 REAL,ALLOCATABLE,DIMENSION(:,:,:)       :: SideSlabNormals              ! normal vectors of bounding slab box (Sides)

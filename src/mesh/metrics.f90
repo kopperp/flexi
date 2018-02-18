@@ -168,7 +168,7 @@ END SUBROUTINE BuildCoords
 !==================================================================================================================================
 !> This routine computes the geometries volume metric terms.
 !==================================================================================================================================
-SUBROUTINE CalcMetrics()
+SUBROUTINE CalcMetrics(XCL_NGeo_Out,dXCL_NGeo_out)
 ! MODULES
 USE MOD_Globals
 USE MOD_PreProc
@@ -184,6 +184,9 @@ USE MOD_Mesh_Vars          ,ONLY: NormVec,TangVec1,TangVec2,SurfElem,Face_xGP
 USE MOD_Mesh_Vars          ,ONLY: firstMPISide_MINE,firstMPISide_YOUR,lastMPISide_YOUR,nSides
 USE MOD_Interpolation_Vars
 USE MOD_Interpolation      ,ONLY: GetVandermonde,GetNodesAndWeights,GetDerivativeMatrix
+!#if FLEXI_PARTICLES
+USE MOD_PARTICLE_SURFACES  ,ONLY: GetBezierControlPoints3d
+!#endif
 #if (PP_dim == 3)
 USE MOD_ChangeBasis        ,ONLY: ChangeBasis3D_XYZ
 #else
@@ -199,6 +202,8 @@ USE MOD_MPI                ,ONLY: StartReceiveMPIData,StartSendMPIData,FinishExc
 IMPLICIT NONE
 !----------------------------------------------------------------------------------------------------------------------------------
 ! INPUT/OUTPUT VARIABLES
+REAL,INTENT(INOUT),OPTIONAL  :: XCL_Ngeo_Out(1:3,0:Ngeo,0:Ngeo,0:Ngeo,nElems)      ! mapping X(xi) P\in Ngeo
+REAL ,INTENT(INOUT),OPTIONAL :: dXCL_Ngeo_Out(1:3,1:3,0:Ngeo,0:Ngeo,0:Ngeo,nElems)   ! jacobi matrix on CL Ngeo
 !----------------------------------------------------------------------------------------------------------------------------------
 ! LOCAL VARIABLES
 INTEGER :: i,j,k,iElem
@@ -238,6 +243,9 @@ REAL    :: Vdm_CLN_N(         0:PP_N   ,0:PP_N)
 ! 3D Vandermonde matrices and lengths,nodes,weights
 REAL,DIMENSION(0:NgeoRef,0:NgeoRef) :: Vdm_xi_Ref,Vdm_eta_Ref
 REAL,DIMENSION(0:PP_N   ,0:PP_N)    :: Vdm_xi_N  ,Vdm_eta_N
+!#if FLEXI_PARTICLES
+REAL,DIMENSION(0:NGeo   ,0:NGeo)    :: Vdm_xi_NGeo  ,Vdm_eta_NGeo  ,Vdm_zeta_NGeo
+!#endif
 #if PP_dim == 3
 REAL,DIMENSION(0:NgeoRef,0:NgeoRef) :: Vdm_zeta_Ref
 REAL,DIMENSION(0:PP_N   ,0:PP_N)    :: Vdm_zeta_N
@@ -470,6 +478,29 @@ DO iElem=1,nElems
       CALL LagrangeInterpolationPolys(xi0(3) + dxi(3),PP_N,xiCL_N,wBaryCL_N,Vdm_zeta_N(i,:))
 #endif
     END DO
+    
+    ! partns - FLEXI_PARTICLES
+!#if FLEXI_PARTICLES
+    IF(PRESENT(XCL_Ngeo_Out))THEN
+        CALL ChangeBasis3D_XYZ(3,NGeo,NGeo,Vdm_xi_NGeo,Vdm_eta_NGeo,Vdm_zeta_NGeo, XCL_NGeo    (1:3,0:NGeo,0:NGeo,0:NGeo) &
+                                                                                 , XCL_NGeo_Out(1:3,0:NGeo,0:NGeo,0:NGeo,iElem))
+      END IF
+      IF(PRESENT(dXCL_nGeo_out))THEN
+        CALL ChangeBasis3D_XYZ(3,NGeo,NGeo,Vdm_xi_NGeo,Vdm_eta_NGeo,Vdm_zeta_NGeo,dXCL_NGeo    (1,1:3,0:NGeo,0:NGeo,0:NGeo) &
+                                                                                 ,dXCL_NGeo_Out(1,1:3,0:NGeo,0:NGeo,0:NGeo,iElem))
+        CALL ChangeBasis3D_XYZ(3,NGeo,NGeo,Vdm_xi_NGeo,Vdm_eta_NGeo,Vdm_zeta_NGeo,dXCL_NGeo    (2,1:3,0:NGeo,0:NGeo,0:NGeo) &
+                                                                                 ,dXCL_NGeo_Out(2,1:3,0:NGeo,0:NGeo,0:NGeo,iElem))
+        CALL ChangeBasis3D_XYZ(3,NGeo,NGeo,Vdm_xi_NGeo,Vdm_eta_NGeo,Vdm_zeta_NGeo,dXCL_NGeo    (3,1:3,0:NGeo,0:NGeo,0:NGeo) &
+                                                                                 ,dXCL_NGeo_Out(3,1:3,0:NGeo,0:NGeo,0:NGeo,iElem))
+      END IF
+      CALL GetBezierControlPoints3D(XCL_NGeo_Out(:,:,:,:,iElem),iElem)
+      
+    IF(PRESENT(XCL_Ngeo_Out))   XCL_Ngeo_Out(1:3,0:Ngeo,0:Ngeo,0:Ngeo,iElem)= XCL_Ngeo(1:3,0:Ngeo,0:Ngeo,0:Ngeo)
+    IF(PRESENT(dXCL_ngeo_out)) dXCL_Ngeo_Out(1:3,1:3,0:Ngeo,0:Ngeo,0:Ngeo,iElem)=dXCL_Ngeo(1:3,1:3,0:Ngeo,0:Ngeo,0:Ngeo)
+    
+    CALL GetBezierControlPoints3D(XCL_NGeo(:,:,:,:),iElem)
+!#endif    
+    
 #if (PP_dim == 3)
     CALL ChangeBasis3D_XYZ(3,PP_N,PP_N,Vdm_xi_N,Vdm_eta_N,Vdm_zeta_N,JaCL_N(1,:,:,:,:),Metrics_fTilde(:,:,:,:,iElem,0))
     CALL ChangeBasis3D_XYZ(3,PP_N,PP_N,Vdm_xi_N,Vdm_eta_N,Vdm_zeta_N,JaCL_N(2,:,:,:,:),Metrics_gTilde(:,:,:,:,iElem,0))

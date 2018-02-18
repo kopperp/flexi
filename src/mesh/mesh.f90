@@ -108,6 +108,12 @@ USE MOD_IO_HDF5,            ONLY:AddToElemData,ElementOut
 #if (PP_dim == 2)
 USE MOD_2D
 #endif
+!#if FLEXI_PARTICLES
+USE MOD_Particle_Mesh!,          ONLY:InitParticleMesh,InitElemVolumes,InitTriaParticleGeometry
+USE MOD_Particle_Tracking_Vars, ONLY:TriaTracking
+USE MOD_Particle_Surfaces_Vars, ONLY:BezierControlPoints3D,SideSlabNormals,SideSlabIntervals
+USE MOD_Particle_Surfaces_Vars, ONLY:BoundingBoxIsEmpty,ElemSlabNormals,ElemSlabIntervals
+!#endif
 IMPLICIT NONE
 !----------------------------------------------------------------------------------------------------------------------------------
 ! INPUT/OUTPUT VARIABLES
@@ -283,10 +289,13 @@ IF (meshMode.GT.0) THEN
 
   SWRITE(UNIT_stdOut,'(A)') "NOW CALLING fillMeshInfo..."
   CALL fillMeshInfo()
-
-  ! dealloacte pointers
-  SWRITE(UNIT_stdOut,'(A)') "NOW CALLING deleteMeshPointer..."
-  CALL deleteMeshPointer()
+  
+  ! deallocate pointers
+#ifndef FLEXI_PARTICLES
+  ! keep pointers for particle mesh
+!  SWRITE(UNIT_stdOut,'(A)') "NOW CALLING deleteMeshPointer..."
+!  CALL deleteMeshPointer()
+#endif
 
 #if (PP_dim ==2)
   ! In 2D, there is only one flip for the slave sides (1)
@@ -354,6 +363,20 @@ IF (meshMode.GT.0) THEN
     END DO
   END DO ! iElem
 END IF
+
+
+!#if FLEXI_PARTICLES
+  ! save geometry information for particle tracking
+  CALL InitParticleMesh()
+!#endif
+  
+!#ifdef FLEXI_PARTICLES
+! init element volume
+CALL InitElemVolumes()
+IF (TriaTracking) THEN
+  CALL InitTriaParticleGeometry()
+END IF
+!#endif
 
 SDEALLOCATE(NodeCoords)
 SDEALLOCATE(dXCL_N)

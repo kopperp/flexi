@@ -142,7 +142,7 @@ SUBROUTINE GetPeriodicVectors()
 !      All other cases: non-Cartesian periodic vectors are possible but not allowed!
 !===================================================================================================================================
 ! MODULES
-USE MOD_Globals,            ONLY: Logging,UNIT_errOut,UNIT_logOut,abort
+USE MOD_Globals,            !ONLY: Logging,UNIT_errOut,UNIT_logOut,abort
 USE MOD_Particle_Mesh_Vars, ONLY: GEO
 USE MOD_PICDepo_Vars
 !----------------------------------------------------------------------------------------------------------------------------------

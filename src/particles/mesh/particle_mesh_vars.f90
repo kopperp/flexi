@@ -13,8 +13,9 @@ SAVE
 ! required variables
 !-----------------------------------------------------------------------------------------------------------------------------------
 ! GLOBAL VARIABLES
-
-
+!-----------------------------------------------------------------------------------------------------------------------------------
+LOGICAL             :: DoWriteStateToHDF5           !< only write HDF5 output if this is true
+!-----------------------------------------------------------------------------------------------------------------------------------
 LOGICAL             :: ParticleMeshInitIsDone
 !-----------------------------------------------------------------------------------------------------------------------------------
 ! Mesh info
@@ -176,5 +177,39 @@ LOGICAL,ALLOCATABLE                      :: isTracingTrouble(:)
 REAL,ALLOCATABLE                         :: ElemTolerance(:)
 !===================================================================================================================================
 
+! partns
+INTEGER          :: NGeoElevated                !< polynomial degree of elevated geometric transformation
+!-----------------------------------------------------------------------------------------------------------------------------------
+! PIC - for Newton localisation of particles in curved Elements
+!-----------------------------------------------------------------------------------------------------------------------------------
+REAL,ALLOCATABLE    :: XiCL_NGeo(:)
+REAL,ALLOCATABLE    :: XiCL_NGeo1(:)
+REAL,ALLOCATABLE    :: XCL_NGeo(:,:,:,:,:)
+REAL,ALLOCATABLE    :: dXCL_NGeo(:,:,:,:,:,:) !jacobi matrix of the mapping P\in NGeo
+REAL,ALLOCATABLE    :: dXCL_N(:,:,:,:,:,:) !jacobi matrix of the mapping P\in NGeo
+REAL,ALLOCATABLE    :: wBaryCL_NGeo(:)
+REAL,ALLOCATABLE    :: wBaryCL_NGeo1(:)
+REAL,ALLOCATABLE    :: DCL_NGeo(:,:)  
+!----------------------------------------------------------------------------------------------------------------------------------
+REAL,ALLOCATABLE :: Xi_NGeo(:)                  !< 1D equidistant point positions for curved elements (during readin)
+REAL             :: DeltaXi_NGeo
+!----------------------------------------------------------------------------------------------------------------------------------
+REAL,ALLOCATABLE,DIMENSION(:,:):: ElemBaryNGeo   !< element local basis: origin
+!----------------------------------------------------------------------------------------------------------------------------------
+REAL,ALLOCATABLE :: Vdm_CLNGeo_CLN(:,:)
+REAL,ALLOCATABLE :: Vdm_CLNGeo_GaussN(:,:)  
+REAL,ALLOCATABLE :: Vdm_CLNGeo1_CLNGeo(:,:)
+REAL,ALLOCATABLE :: Vdm_NGeo_CLNGeo(:,:)  
+INTEGER,ALLOCATABLE :: MortarSlave2MasterInfo(:) !< 1:nSides: map of slave mortar sides to belonging master mortar sides
+LOGICAL,ALLOCATABLE :: CurvedElem(:)
+!----------------------------------------------------------------------------------------------------------------------------------
+INTEGER(KIND=8),ALLOCATABLE     :: ElemToElemGlob(:,:,:)             !< mapping from element to neighbor element in global ids
+                                                                     !< [1:4] (mortar) neighbors
+                                                                     !< [1:6] local sides
+                                                                     !< [OffSetElem+1:OffsetElem+PP_nElems]
+!----------------------------------------------------------------------------------------------------------------------------------
+! partns - do it with 5th dimension nElems for particles
+!REAL,ALLOCATABLE    :: XCL_NGeo(:,:,:,:,:)
+!REAL,ALLOCATABLE    :: dXCL_NGeo(:,:,:,:,:,:) !jacobi matrix of the mapping P\in NGeo
 
 END MODULE MOD_Particle_Mesh_Vars

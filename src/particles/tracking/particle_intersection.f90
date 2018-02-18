@@ -168,7 +168,7 @@ SUBROUTINE ComputePlanarRectIntersection(isHit                       &
 !===================================================================================================================================
 ! MODULES
 USE MOD_Globals
-USE MOD_Globals_Vars,            ONLY:epsMach
+USE MOD_Particle_Globals
 USE MOD_Particle_Vars,           ONLY:LastPartPos
 USE MOD_Particle_Surfaces_Vars,  ONLY:SideNormVec,epsilontol,SideDistance
 USE MOD_Particle_Surfaces_Vars,  ONLY:BaseVectors0,BaseVectors1,BaseVectors2
@@ -324,14 +324,15 @@ SUBROUTINE ComputePlanarCurvedIntersection(isHit                       &
 ! particle path = LastPartPos+lengthPartTrajectory*PartTrajectory
 !===================================================================================================================================
 ! MODULES
-USE MOD_Globals_Vars,            ONLY:PI
-USE MOD_Globals,                 ONLY:Cross,abort,UNIT_stdOut,MyRank,CROSSNORM,UNITVECTOR
+USE MOD_Globals !_Vars,            ONLY:PI
+USE MOD_Particle_Globals
+!USE MOD_Globals,                 ONLY:Cross,abort,UNIT_stdOut,MyRank,CROSSNORM,UNITVECTOR
 USE MOD_Mesh_Vars,               ONLY:NGeo
 USE MOD_Particle_Vars,           ONLY:LastPartPos
 USE MOD_Particle_Surfaces_Vars,  ONLY:SideNormVec,SideSlabNormals
 USE MOD_Particle_Surfaces_Vars,  ONLY:BezierControlPoints3D
 USE MOD_Particle_Surfaces_Vars,  ONLY:locXi,locEta,locAlpha,SideDistance
-USE MOD_Utils,                   ONLY:InsertionSort !BubbleSortID
+USE MOD_Particle_Utils,          ONLY:InsertionSort !BubbleSortID
 USE MOD_Particle_Tracking_Vars,  ONLY:DoRefMapping
 #ifdef CODE_ANALYZE
 USE MOD_Particle_Surfaces_Vars,  ONLY:BezierClipMaxIntersec,BezierClipMaxIter
@@ -1109,8 +1110,9 @@ SUBROUTINE ComputeCurvedIntersection(isHit,PartTrajectory,lengthPartTrajectory,a
 ! particle path = LastPartPos+lengthPartTrajectory*PartTrajectory
 !===================================================================================================================================
 ! MODULES
-USE MOD_Globals_Vars,            ONLY:PI
-USE MOD_Globals,                 ONLY:Cross,abort,UNIT_stdOut,CROSSNORM,UNITVECTOR
+USE MOD_Globals !_Vars,            ONLY:PI
+! USE MOD_Globals,                 ONLY:Cross,abort,UNIT_stdOut,CROSSNORM,UNITVECTOR
+USE MOD_Particle_Globals
 USE MOD_Mesh_Vars,               ONLY:NGeo,BC
 USE MOD_Particle_Vars,           ONLY:PartState,LastPartPos
 USE MOD_Particle_Surfaces_Vars,  ONLY:SideNormVec,BezierNewtonAngle
@@ -1118,7 +1120,7 @@ USE MOD_Particle_Surfaces_Vars,  ONLY:BezierControlPoints3D
 USE MOD_Particle_Surfaces_Vars,  ONLY:locXi,locEta,locAlpha
 USE MOD_Particle_Surfaces_Vars,  ONLY:BoundingBoxIsEmpty
 USE MOD_Particle_Surfaces_Vars,  ONLY:SideSlabNormals!,epsilonTol
-USE MOD_Utils,                   ONLY:InsertionSort !BubbleSortID
+USE MOD_Particle_Utils,                   ONLY:InsertionSort !BubbleSortID
 USE MOD_Particle_Tracking_Vars,  ONLY:DoRefMapping
 USE MOD_Particle_Surfaces_Vars,  ONLY:BezierClipTolerance,BezierClipLocalTol
 USE MOD_Particle_Surfaces,       ONLY:CalcNormAndTangBezier
@@ -1897,7 +1899,7 @@ SUBROUTINE calcLineNormVec2(BezierControlPoints2D,LineNormVec,a,b)
 ! Calculate the normal vector for the line Ls (with which the distance of a point to the line Ls is determined)
 !================================================================================================================================
 USE MOD_Globals
-USE MOD_Globals_Vars
+USE MOD_Particle_Globals
 USE MOD_Mesh_Vars,               ONLY:NGeo
 ! IMPLICIT VARIABLE HANDLING
 IMPLICIT NONE
@@ -2106,7 +2108,7 @@ SUBROUTINE CalcSminSmax(minmax,Smin,Smax,iter,PartID)
 ! find upper and lower intersection with convex hull (or no intersection)
 ! find the largest and smallest roots of the convex hull, pre-sorted values minmax(:,:) are required
 !================================================================================================================================
-USE MOD_Mesh_Vars,               ONLY:NGeo,Xi_NGeo,DeltaXi_NGeo
+USE MOD_Mesh_Vars,               ONLY:NGeo !,Xi_NGeo,DeltaXi_NGeo
 USE MOD_Particle_Surfaces_Vars,  ONLY:BezierClipTolerance,BezierClipHit
 #ifdef CODE_ANALYZE
 USE MOD_Globals,                 ONLY:UNIT_stdOut,MyRank
@@ -2130,51 +2132,51 @@ INTEGER                              :: l
 
 Smin=1.5
 Smax=-1.5
-DO l=0,NGeo-1
-  ! 1.) check traverse line UPPER/LOWER
-  ! upper line, max values
-  IF(minmax(2,l)*minmax(2,l+1).LE.0.)THEN
-    m    = (minmax(2,l+1)-minmax(2,l))/DeltaXi_NGeo
-    tmp  = Xi_NGeo(l)-minmax(2,l)/m
-    Smin = MIN(tmp,Smin)
-  END IF
-  ! lower line, min values
-  IF(minmax(1,l)*minmax(1,l+1).LE.0.)THEN
-    m    = (minmax(1,l+1)-minmax(1,l))/DeltaXi_NGeo
-    tmp  = Xi_NGeo(l)-minmax(1,l)/m
-    Smax = MAX(tmp,Smax)
-  END IF
-END DO
-
-! 2.) check BEGINNING/END upper convex hull
-DO l=1,NGeo
-  IF(minmax(2,0)*minmax(2,l) .LE.0.)THEN
-    ! interval is the whole parameter space
-    m    = (minmax(2,l)-minmax(2,0))/(DeltaXi_NGeo*l)
-    tmp  = -1.0-minmax(2,0)/m
-    Smin = MIN(tmp,Smin)
-  END IF
-  IF(minmax(1,0)*minmax(1,l) .LE.0.)THEN
-    ! interval is the whole parameter space
-    m    = (minmax(1,l)-minmax(1,0))/(DeltaXi_NGeo*l)
-    tmp  = -1.0-minmax(1,0)/m
-    Smax = MAX(tmp,Smax)
-  END IF
-END DO ! l
-DO l=0,NGeo-1
-  IF(minmax(2,l)*minmax(2,NGeo) .LE.0.)THEN
-    ! interval is the whole parameter space
-    m    = (minmax(2,NGeo)-minmax(2,l))/(DeltaXi_NGeo*(NGeo-l))
-    tmp  = Xi_NGeo(l)-minmax(2,l)/m
-    Smin = MIN(tmp,Smin)
-  END IF
-  IF(minmax(1,l)*minmax(1,NGeo) .LE.0.)THEN
-    ! interval is the whole parameter space
-    m    = (minmax(1,NGeo)-minmax(1,l))/(DeltaXi_NGeo*(NGeo-l))
-    tmp  = Xi_NGeo(l)-minmax(1,l)/m
-    Smax = MAX(tmp,Smax)
-  END IF
-END DO ! l
+!DO l=0,NGeo-1
+!  ! 1.) check traverse line UPPER/LOWER
+!  ! upper line, max values
+!  IF(minmax(2,l)*minmax(2,l+1).LE.0.)THEN
+!    m    = (minmax(2,l+1)-minmax(2,l))/DeltaXi_NGeo
+!    tmp  = Xi_NGeo(l)-minmax(2,l)/m
+!    Smin = MIN(tmp,Smin)
+!  END IF
+!  ! lower line, min values
+!  IF(minmax(1,l)*minmax(1,l+1).LE.0.)THEN
+!    m    = (minmax(1,l+1)-minmax(1,l))/DeltaXi_NGeo
+!    tmp  = Xi_NGeo(l)-minmax(1,l)/m
+!    Smax = MAX(tmp,Smax)
+!  END IF
+!END DO
+!
+!! 2.) check BEGINNING/END upper convex hull
+!DO l=1,NGeo
+!  IF(minmax(2,0)*minmax(2,l) .LE.0.)THEN
+!    ! interval is the whole parameter space
+!    m    = (minmax(2,l)-minmax(2,0))/(DeltaXi_NGeo*l)
+!    tmp  = -1.0-minmax(2,0)/m
+!    Smin = MIN(tmp,Smin)
+!  END IF
+!  IF(minmax(1,0)*minmax(1,l) .LE.0.)THEN
+!    ! interval is the whole parameter space
+!    m    = (minmax(1,l)-minmax(1,0))/(DeltaXi_NGeo*l)
+!    tmp  = -1.0-minmax(1,0)/m
+!    Smax = MAX(tmp,Smax)
+!  END IF
+!END DO ! l
+!DO l=0,NGeo-1
+!  IF(minmax(2,l)*minmax(2,NGeo) .LE.0.)THEN
+!    ! interval is the whole parameter space
+!    m    = (minmax(2,NGeo)-minmax(2,l))/(DeltaXi_NGeo*(NGeo-l))
+!    tmp  = Xi_NGeo(l)-minmax(2,l)/m
+!    Smin = MIN(tmp,Smin)
+!  END IF
+!  IF(minmax(1,l)*minmax(1,NGeo) .LE.0.)THEN
+!    ! interval is the whole parameter space
+!    m    = (minmax(1,NGeo)-minmax(1,l))/(DeltaXi_NGeo*(NGeo-l))
+!    tmp  = Xi_NGeo(l)-minmax(1,l)/m
+!    Smax = MAX(tmp,Smax)
+!  END IF
+!END DO ! l
 
 ! 3.) check vertical line LEFT/RIGHT of convex hull    
 IF(minmax(1,0)*minmax(2,0)    .LE.0.)THEN
@@ -2215,7 +2217,9 @@ FUNCTION InsideBoundingBox(ParticlePosition,SideID)
 !================================================================================================================================
 ! check is the particles is inside the bounding box, return TRUE/FALSE
 !================================================================================================================================
-USE MOD_Globals_Vars
+USE MOD_Globals
+USE MOD_Particle_Globals
+USE MOD_Particle_Vars
 USE MOD_Particle_Surfaces_Vars,  ONLY:SideSlabNormals,SideSlabIntervals,BezierControlPoints3D
 ! IMPLICIT VARIABLE HANDLING
 IMPLICIT NONE
@@ -2260,8 +2264,8 @@ FUNCTION BoundingBoxIntersection(PartTrajectory,lengthPartTrajectory,PartID,Side
 !================================================================================================================================
 ! check if the particle trajectory penetrates the bounding box, return TRUE/FALSE
 !================================================================================================================================
-USE MOD_Globals_Vars
-USE MOD_Globals,                  ONLY:abort
+USE MOD_Globals
+USE MOD_Particle_Globals
 USE MOD_Particle_Vars,            ONLY:LastPartPos
 USE MOD_Particle_Surfaces_Vars,   ONLY:SideSlabNormals,SideSlabIntervals,BezierControlPoints3D
 ! IMPLICIT VARIABLE HANDLING
@@ -2332,7 +2336,8 @@ FUNCTION FlatBoundingBoxIntersection(PartTrajectory,lengthPartTrajectory,PartID,
 !================================================================================================================================
 ! check if the particle trajectory penetrates the bounding box, return TRUE/FALSE
 !================================================================================================================================
-USE MOD_Globals_Vars
+USE MOD_Globals
+USE MOD_Particle_Globals
 USE MOD_Particle_Vars,            ONLY:LastPartPos
 USE MOD_Particle_Surfaces_Vars,   ONLY:SideSlabNormals,SideSlabIntervals,BezierControlPoints3D
 ! IMPLICIT VARIABLE HANDLING
@@ -2492,6 +2497,7 @@ FUNCTION ComputeSurfaceDistance2(SideNormVec,BiLinearCoeff,xi,eta,PartTrajectory
 !================================================================================================================================
 USE MOD_Preproc
 USE MOD_Globals
+USE MOD_Particle_Globals
 USE MOD_Particle_Surfaces_Vars,   ONLY:epsilontol
 USE MOD_Particle_Vars,            ONLY:LastPartPos
 #ifdef CODE_ANALYZE
@@ -3888,7 +3894,7 @@ SUBROUTINE calcLineNormVec3(BezierControlPoints2D,LineNormVec)
 !                               the scalar product <LineNormVec,ControlPoint> gives the distance
 !================================================================================================================================
 USE MOD_Globals
-USE MOD_Globals_Vars
+USE MOD_Particle_Globals
 USE MOD_Mesh_Vars,               ONLY:NGeo
 ! IMPLICIT VARIABLE HANDLING
 IMPLICIT NONE
@@ -3994,7 +4000,7 @@ SUBROUTINE CalcSminSmax2(minmax,Smin,Smax,iter,PartID)
 ! 2) check lower line for an intersection with x-axis
 ! 3) check if both ends have a sign change
 !================================================================================================================================
-USE MOD_Mesh_Vars,               ONLY:NGeo,Xi_NGeo
+USE MOD_Mesh_Vars,               ONLY:NGeo !,Xi_NGeo
 USE MOD_Particle_Surfaces_Vars,  ONLY:BezierClipTolerance,BezierClipHit
 #ifdef CODE_ANALYZE
 USE MOD_Globals,                 ONLY:UNIT_stdOut,MyRank
@@ -4024,29 +4030,29 @@ DO p=0,NGeo
   DO q=0,NGeo
     IF(p.EQ.q) CYCLE
     ! 1) check for upper line
-    IF(minmax(2,p)*minmax(2,q).LE.0.)THEN
-      m=(minmax(2,q)-minmax(2,p))/(Xi_NGeo(q)-Xi_NGeo(p));
-      IF(m.LT.0.)THEN ! move right boundary
-        tmp=Xi_NGeo(q)-minmax(2,q)/m;
-        smax=MAX(smax,tmp);
-      END IF
-      IF(m.GT.0.)THEN ! move left boundary
-        tmp=Xi_NGeo(q)-minmax(2,q)/m;
-        smin=MIN(smin,tmp);
-      END IF
-    END IF
-    ! 2) check for lower line
-    IF(minmax(1,p)*minmax(1,q).LE.0.)THEN
-      m=(minmax(1,q)-minmax(1,p))/(Xi_NGeo(q)-Xi_NGeo(p));
-      IF(m.GT.0.)THEN ! move right boundary
-        tmp=Xi_NGeo(q)-minmax(1,q)/m;
-        smax=MAX(smax,tmp);
-      END IF
-      IF(m.LT.0.)THEN ! move right boundary
-        tmp=Xi_NGeo(q)-minmax(1,q)/m;
-        smin=MIN(smin,tmp);
-      END IF
-    END IF        
+!    IF(minmax(2,p)*minmax(2,q).LE.0.)THEN
+!      m=(minmax(2,q)-minmax(2,p))/(Xi_NGeo(q)-Xi_NGeo(p));
+!      IF(m.LT.0.)THEN ! move right boundary
+!        tmp=Xi_NGeo(q)-minmax(2,q)/m;
+!        smax=MAX(smax,tmp);
+!      END IF
+!      IF(m.GT.0.)THEN ! move left boundary
+!        tmp=Xi_NGeo(q)-minmax(2,q)/m;
+!        smin=MIN(smin,tmp);
+!      END IF
+!    END IF
+!    ! 2) check for lower line
+!    IF(minmax(1,p)*minmax(1,q).LE.0.)THEN
+!      m=(minmax(1,q)-minmax(1,p))/(Xi_NGeo(q)-Xi_NGeo(p));
+!      IF(m.GT.0.)THEN ! move right boundary
+!        tmp=Xi_NGeo(q)-minmax(1,q)/m;
+!        smax=MAX(smax,tmp);
+!      END IF
+!      IF(m.LT.0.)THEN ! move right boundary
+!        tmp=Xi_NGeo(q)-minmax(1,q)/m;
+!        smin=MIN(smin,tmp);
+!      END IF
+!    END IF        
   END DO ! p=0,PP_N
 END DO ! q=0,PP_N
 

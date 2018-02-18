@@ -56,6 +56,10 @@ INTERFACE FinalizeMappings
   MODULE PROCEDURE FinalizeMappings
 END INTERFACE
 
+INTERFACE CGNS_SideToVol2
+  MODULE PROCEDURE CGNS_SideToVol2
+END INTERFACE
+
 
 PUBLIC::BuildMappings
 PUBLIC::Flip_S2M
@@ -65,6 +69,7 @@ PUBLIC::SideToVol2
 PUBLIC::VolToSide
 !PUBLIC::ElemToNbElem
 PUBLIC::FinalizeMappings
+PUBLIC::CGNS_SideToVol2
 !==================================================================================================================================
 
 CONTAINS

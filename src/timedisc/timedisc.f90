@@ -86,7 +86,7 @@ USE MOD_Filter_Vars         ,ONLY:NFilter,FilterType
 USE MOD_Mesh_Vars           ,ONLY:nElems
 USE MOD_IO_HDF5             ,ONLY:AddToElemData,ElementOut
 !#ifdef FLEXI_PARTICLES
-!USE MOD_Particle_TimeDisc
+USE MOD_Particle_TimeDisc
 !#endif
 IMPLICIT NONE
 !----------------------------------------------------------------------------------------------------------------------------------
@@ -142,7 +142,7 @@ SWRITE(UNIT_stdOut,'(A)')' INIT TIMEDISC DONE!'
 SWRITE(UNIT_StdOut,'(132("-"))')
 
 !#ifdef FLEXI_PARTICLES
-!CALL Particle_InitTimeDisc()
+CALL Particle_InitTimeDisc()
 !#endif
 
 END SUBROUTINE InitTimeDisc
@@ -181,7 +181,7 @@ USE MOD_Indicator           ,ONLY: doCalcIndicator,CalcIndicator
 USE MOD_FV
 #endif
 !#ifdef FLEXI_PARTICLES
-!USE MOD_Particle_TimeDisc
+USE MOD_Particle_TimeDisc
 !#endif
 use MOD_IO_HDF5
 IMPLICIT NONE
@@ -269,7 +269,7 @@ IF(errType.NE.0) CALL abort(__STAMP__,&
   'Error: (1) density, (2) convective / (3) viscous timestep is NaN. Type/time:',errType,t)
   
 !#ifdef FLEXI_PARTICLES
-!  CALL Particle_TimeDisc()
+  CALL Particle_TimeDisc(iter)
 !#endif
 
 ! Run initial analyze
@@ -431,7 +431,7 @@ USE MOD_FV           ,ONLY: FV_Switch
 USE MOD_FV_Vars      ,ONLY: FV_toDGinRK
 #endif
 !#ifdef FLEXI_PARTICLES
-!USE MOD_Particle_TimeDisc
+USE MOD_Particle_TimeDisc
 !#endif
 IMPLICIT NONE
 !-----------------------------------------------------------------------------------------------------------------------------------
@@ -456,11 +456,14 @@ CALL VCopy(nTotalU,Ut_temp,Ut)               !Ut_temp = Ut
 CALL VAXPBY(nTotalU,U,Ut,ConstIn=b_dt(1))    !U       = U + Ut*b_dt(1)
 
 !#ifdef FLEXI_PARTICLES
-!  CALL Particle_TimeStepByLSERK()
+  CALL Particle_TimeStepByLSERK(iStage,tStage,b_dt)
 !#endif
 
 ! Following steps
 DO iStage=2,nRKStages
+!#ifdef FLEXI_PARTICLES
+  CALL Particle_TimeStepByLSERK_RK(t,iStage,tStage,b_dt)
+!#endif
   CurrentStage=iStage
   tStage=t+dt*RKc(iStage)
   IF(doCalcIndicator) CALL CalcIndicator(U,t)
@@ -470,9 +473,6 @@ DO iStage=2,nRKStages
   CALL DGTimeDerivative_weakForm(tStage) ! Expand this to include Particles
   CALL VAXPBY(nTotalU,Ut_temp,Ut,ConstOut=-RKA(iStage)) !Ut_temp = Ut - Ut_temp*RKA(iStage)
   CALL VAXPBY(nTotalU,U,Ut_temp,ConstIn =b_dt(iStage))  !U       = U + Ut_temp*b_dt(iStage)
-!#ifdef FLEXI_PARTICLES
-!  CALL Particle_TimeStepByLSERK_RK(t)
-!#endif
   
 END DO
 CurrentStage=1
@@ -502,7 +502,7 @@ USE MOD_FV           ,ONLY: FV_Switch
 USE MOD_FV_Vars      ,ONLY: FV_toDGinRK
 #endif
 !#ifdef FLEXI_PARTICLES
-!USE MOD_Particle_TimeDisc
+USE MOD_Particle_TimeDisc
 !#endif
 IMPLICIT NONE
 !-----------------------------------------------------------------------------------------------------------------------------------
@@ -532,7 +532,7 @@ CALL VCopy(nTotalU,S2,U)                       !S2=U
 CALL VAXPBY(nTotalU,U,Ut,ConstIn=b_dt(1))      !U      = U + Ut*b_dt(1)
 
 !#ifdef FLEXI_PARTICLES
-!  CALL Particle_TimeStepByLSERK()
+  CALL Particle_TimeStepByLSERK(iStage,tStage,b_dt)
 !#endif
 
 DO iStage=2,nRKStages
@@ -548,7 +548,7 @@ DO iStage=2,nRKStages
   CALL VAXPBY(nTotalU,U,Uprev,ConstIn=RKg3(iStage))                !U = U + RKg3(ek)*Uprev
   CALL VAXPBY(nTotalU,U,Ut,ConstIn=b_dt(iStage))                   !U = U + Ut*b_dt(iStage)
 !#ifdef FLEXI_PARTICLES
-!  CALL Particle_TimeStepByLSERK_RK(t)
+  CALL Particle_TimeStepByLSERK_RK(t,iStage,tStage,b_dt)
 !#endif
 END DO
 CurrentStage=1

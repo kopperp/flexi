@@ -44,8 +44,9 @@ USE MOD_MPI,               ONLY:DefineParametersMPI,InitMPI
 #if USE_MPI
 USE MOD_MPI,               ONLY:InitMPIvars,FinalizeMPI
 #endif
-! #ifdef PARTICLES
+! #ifdef FLEXI_PARTICLES
 USE MOD_ParticleInit,       ONLY:InitParticles,DefineParametersParticles
+USE MOD_PICInit,            ONLY:DefineParametersPIC
 ! #endif
 USE MOD_Sponge,            ONLY:DefineParametersSponge,InitSponge,FinalizeSponge
 #if FV_ENABLED
@@ -113,7 +114,10 @@ CALL DefineParametersTimedisc()
 CALL DefineParametersAnalyze()
 CALL DefineParametersRecordPoints()
 ! Particles
+!#ifdef FLEXI_PARTICLES
 CALL DefineParametersParticles()
+CALL DefineParametersPIC()
+!#endif /*FLEXI_PARTICLES*/
 
 ! check for command line argument --help or --markdown
 IF (doPrintHelp.GT.0) THEN
@@ -182,11 +186,11 @@ CALL InitSponge()
 CALL InitTimeDisc()
 CALL InitAnalyze()
 CALL InitRecordpoints()
+!#if FLEXI_PARTICLES
+CALL InitParticles()
+!#endif
 CALL IgnoredParameters()
 CALL Restart()
-! #ifdef PARTICLES
-CALL InitParticles()
-! #endif
 
 ! Measure init duration
 Time=FLEXITIME()

@@ -87,6 +87,7 @@ SUBROUTINE InitParticleSurfaces()
 !===================================================================================================================================
 ! MODULES
 USE MOD_Globals
+USE MOD_PARTICLE_Globals
 USE MOD_Particle_Surfaces_vars
 USE MOD_Preproc
 USE MOD_Mesh_Vars,                  ONLY:nSides,NGeo,nBCSides
@@ -289,6 +290,7 @@ SUBROUTINE CalcNormAndTangTriangle(nVec,tang1,tang2,TriNum,SideID)
 ! function to compute the normal vector of a triangulated surface
 !================================================================================================================================
 USE MOD_Globals,                              ONLY:Abort
+USE MOD_PARTICLE_Globals
 USE MOD_Particle_Vars,                        ONLY:PEM
 USE MOD_Particle_Mesh_Vars,                   ONLY:GEO,PartSideToElem
 USE MOD_Particle_Tracking_Vars,               ONLY:TrackInfo
@@ -603,7 +605,8 @@ SUBROUTINE GetBezierControlPoints3D(XCL_NGeo,ElemID,ilocSide_In,SideID_In)
 ! MODULES
 USE MOD_Globals
 USE MOD_Preproc
-USE MOD_Mesh_Vars,                ONLY:ElemToSide,NGeo,MortarSlave2MasterInfo,MortarType
+USE MOD_Mesh_Vars,                ONLY:ElemToSide,NGeo,MortarType!,MortarSlave2MasterInfo
+USE MOD_Particle_Mesh_Vars,       ONLY:MortarSlave2MasterInfo
 USE MOD_Particle_Surfaces_Vars,   ONLY:BezierControlPoints3D,sVdm_Bezier
 USE MOD_ChangeBasis,              ONLY:ChangeBasis2D
 USE MOD_Mappings,                 ONLY:CGNS_SideToVol2
@@ -658,7 +661,8 @@ __STAMP__&
     CALL ChangeBasis2D(3,NGeo,NGeo,sVdm_Bezier,tmp,tmp2)
     ! turn into right hand system of side
     DO q=0,NGeo; DO p=0,NGeo
-      pq=CGNS_SideToVol2(NGeo,p,q,iLocSide)
+        ! partns - adjust for 3D case in FLEXI
+      pq=CGNS_SideToVol2(NGeo,p,q,iLocSide,3)
       ! Compute BezierControlPoints3D for sides in MASTER system
       BezierControlPoints3D(1:3,p,q,sideID)=tmp2(1:3,pq(1),pq(2))
     END DO; END DO ! p,q
@@ -666,8 +670,6 @@ __STAMP__&
 END DO ! ilocSide=1,6
 
 END SUBROUTINE GetBezierControlPoints3D
-
-
 
 SUBROUTINE GetSideSlabNormalsAndIntervals(BezierControlPoints3D,BezierControlPoints3DElevated &
                                          ,SideSlabNormals,SideSlabInterVals,BoundingBoxIsEmpty )
@@ -684,10 +686,12 @@ SUBROUTINE GetSideSlabNormalsAndIntervals(BezierControlPoints3D,BezierControlPoi
 !===================================================================================================================================
 ! MODULES
 USE MOD_Globals
+USE MOD_Particle_Globals
 USE MOD_Preproc
-USE MOD_Mesh_Vars,                ONLY: NGeo,NGeoElevated
+USE MOD_Mesh_Vars,                ONLY: NGeo!,NGeoElevated
+USE MOD_Particle_Mesh_Vars,       ONLY: NGeoElevated
 !USE MOD_Particle_Surfaces_Vars,   ONLY: SideSlabNormals,SideSlabIntervals,BoundingBoxIsEmpty
-!USE MOD_Particle_Surfaces_Vars,   ONLY: BezierControlPoints3D,BezierControlPoints3DElevated,BezierElevation
+!USE MOD_Particle_Surfaces_Vars,   ONLY: BezierControlPoints3DElevated,BezierElevation,BezierControlPoints3D
 USE MOD_Particle_Surfaces_Vars,   ONLY: BezierElevation
 USE MOD_Particle_Surfaces_Vars,   ONLY: BezierEpsilonBilinear
 #ifdef CODE_ANALYZE
@@ -935,6 +939,7 @@ SUBROUTINE GetElemSlabNormalsAndIntervals(NGeo,ElemID)
 !===================================================================================================================================
 ! MODULES
 USE MOD_Globals
+USE MOD_PARTICLE_Globals
 USE MOD_Preproc
 USE MOD_Particle_Mesh_Vars,       ONLY:PartElemToSide,GEO,RefMappingEps 
 USE MOD_Particle_Surfaces_Vars,   ONLY:ElemSlabNormals,ElemSlabIntervals,BezierControlPoints3DElevated,BezierElevation
@@ -1117,6 +1122,7 @@ SUBROUTINE GetBezierSampledAreas(SideID,BezierSampleN,BezierSurfFluxProjection_o
 !===================================================================================================================================
 ! MODULES
 USE MOD_Globals
+USE MOD_PARTICLE_Globals
 USE MOD_Particle_Surfaces_Vars, ONLY:epsilontol,BezierControlPoints3D
 USE MOD_Basis,                  ONLY:LegendreGaussNodesAndWeights
 USE MOD_Mesh_Vars,              ONLY:NGeo
@@ -1404,7 +1410,7 @@ INTEGER                       :: p,q,pq(2)
 BezierControlPoints3D_tmp=BezierControlPoints3D
 
 DO q=0,NGeo; DO p=0,NGeo
-  pq = Flip_M2S(NGeo,p,q,flip) 
+  pq = Flip_M2S(NGeo,p,q,flip,2) ! CHECK DIMENSION FOR FLEXI
   BezierControlPoints3D(:,pq(1),pq(2))=BezierControlPoints3d_tmp(:,p,q)
 END DO; END DO ! p,q
 

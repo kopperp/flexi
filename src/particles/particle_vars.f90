@@ -23,13 +23,13 @@ SAVE
 !-----------------------------------------------------------------------------------------------------------------------------------
 ! GLOBAL VARIABLES 
 !-----------------------------------------------------------------------------------------------------------------------------------
-!REAL, PARAMETER       :: BoltzmannConst=1.380648813E-23                      ! Boltzmann constant [J/K] SI-Unit! in m^2/(s^2*K)
+REAL, PARAMETER       :: BoltzmannConst=1.380648813E-23                      ! Boltzmann constant [J/K] SI-Unit! in m^2/(s^2*K)
 REAL                  :: ManualTimeStep                                      ! Manual TimeStep
 LOGICAL               :: useManualTimeStep                                   ! Logical Flag for manual timestep. For consistency
 !                                                                             ! with IAG programming style
 LOGICAL               :: KeepWallParticles                                   ! Flag for tracking of adsorbed Particles
 LOGICAL               :: printRandomSeeds                                    ! print random seeds or not
-!REAL                  :: dt_max_particles                                    ! Maximum timestep for particles (for static fields!)
+REAL                  :: dt_max_particles                                    ! Maximum timestep for particles (for static fields!)
 !REAL                  :: dt_maxwell                                          ! timestep for field solver (for static fields only!)
 !REAL                  :: dt_adapt_maxwell                                    ! adapted timestep for field solver dependent  
                                                                              ! on particle velocity (for static fields only!)
@@ -37,6 +37,7 @@ LOGICAL               :: printRandomSeeds                                    ! p
                                                                               ! into themselves)
 REAL    , ALLOCATABLE :: PartState(:,:)                                      ! (1:NParts,1:6) with 2nd index: x,y,z,vx,vy,vz
 REAL    , ALLOCATABLE :: PartPosRef(:,:)                                     ! (1:3,1:NParts) particles pos mapped to -1|1 space
+INTEGER , ALLOCATABLE :: PartPosGauss(:,:)                                   ! (1:NParts,1:3) Gauss point localization of particles
 REAL    , ALLOCATABLE :: Pt(:,:)                                             ! Derivative of PartState (vx,xy,vz) only
 
 !#if defined(IMEX) || defined(IMPA)
@@ -64,12 +65,12 @@ REAL    , ALLOCATABLE :: Pt(:,:)                                             ! D
 !LOGICAL , ALLOCATABLE :: DoPartInNewton(:)                                   ! particle is treated implicitly && Newtons method
 !                                                                             ! is performed on it
 !#endif
-!REAL    , ALLOCATABLE :: Pt_temp(:,:)                                        ! LSERK4 additional derivative of PartState
+REAL    , ALLOCATABLE :: Pt_temp(:,:)                                        ! LSERK4 additional derivative of PartState
 !
 !                                                                             ! (1:NParts,1:6) with 2nd index: x,y,z,vx,vy,vz
 REAL    , ALLOCATABLE :: LastPartPos(:,:)                                    ! (1:NParts,1:3) with 2nd index: x,y,z
 INTEGER , ALLOCATABLE :: PartSpecies(:)                                      ! (1:NParts) 
-!REAL    , ALLOCATABLE :: PartMPF(:)                                          ! (1:NParts) MacroParticleFactor by variable MPF
+REAL    , ALLOCATABLE :: PartMPF(:)                                          ! (1:NParts) MacroParticleFactor by variable MPF
 INTEGER               :: PartRHSMethod
 
 INTEGER               :: nrSeeds                                             ! Number of Seeds for Random Number Generator
@@ -159,7 +160,7 @@ TYPE tInit                                                                   ! P
                                                                              !              - ...more following...
   LOGICAL                                :: vpiBVBuffer(4)                   ! incl. buffer region in -BV1/+BV1/-BV2/+BV2 direction?
   !TYPE(tConstPressure)                   :: ConstPress!(:)           =>NULL() !
-  !INTEGER                                :: NumberOfExcludeRegions           ! Number of different regions to be excluded
+  INTEGER                                :: NumberOfExcludeRegions           ! Number of different regions to be excluded
   TYPE(tExcludeRegion), ALLOCATABLE      :: ExcludeRegion(:)
 #ifdef MPI
   INTEGER                                :: InitComm                          ! number of init-communicator

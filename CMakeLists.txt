@@ -87,6 +87,9 @@ SUBDIRLIST(LIFTINGS   ${CMAKE_CURRENT_SOURCE_DIR}/src/dg/)
 
 OPTION(FLEXI_BUILDPOSTI "Build POSTI toolset" ON)
 OPTION(FLEXI_MPI "Compile SINGLE or MPI version" OFF)
+
+OPTION(MPI "MPI carried over from boltplatz" ON)
+
 OPTION(FLEXI_PARABOLIC "Enable parabolic terms of equation-system" ON)
 OPTION(FLEXI_EDDYVISCOSITY "Enable eddy viscosity modells" OFF)
 OPTION(FLEXI_MKL "Use MKL libraries instead of BLAS/LAPACK" OFF)

@@ -48,26 +48,52 @@ SUBROUTINE DefineParametersParticles()
 ! MODULES
 USE MOD_ReadInTools! ,ONLY: prms,addStrListEntry
 USE MOD_Particle_Vars
+USE Mod_Particle_Globals
 
 IMPLICIT NONE
 !
 CHARACTER(32)         :: hilf, hilf2
 INTEGER               :: iSpec,iInit,nSpeciesInit
 !==================================================================================================================================
-!CALL prms%CreateIntOption('Part-maxParticleNumber', "Max number of particles in part")
+CALL prms%CreateIntOption('Part-maxParticleNumber', "Max number of particles in part")
 CALL prms%CreateIntOption('Part-nBounds', "")
 CALL prms%CreateIntOption('Part-nSpecies', "Number of species in part")
-!CALL prms%CreateIntOption('Part-IterationForMacroVal', "")
-!CALL prms%CreateIntOption('Particles-NumberOfRandomVectors', "Number of random vectors")
+CALL prms%CreateIntOption('Part-IterationForMacroVal', "")
+CALL prms%CreateIntOption('Particles-NumberOfRandomVectors', "Number of random vectors")
+CALL prms%CreateIntOption('RefMappingGuess', "")
+CALL prms%CreateIntOption('BezierElevation', "")
+CALL prms%CreateIntOption('BezierSampleN', "")
+CALL prms%CreateIntOption('Part-nPeriodicVectors', "")
+CALL prms%CreateIntOption('PIC-shapefunction-alpha', "")
+CALL prms%CreateIntOption('PIC-NbrOfSFdepoFixes', "")
+CALL prms%CreateIntOption('PIC-NbrOfSFdepoLayers', "")
 
-!CALL prms%CreateLogicalOption('Part-WriteOutputMesh', "")
-!CALL prms%CreateLogicalOption('Part-WriteMacroValues',"")
-!CALL prms%CreateLogicalOption('Part-WriteMacroVolumeValues',"")
-!CALL prms%CreateLogicalOption('Part-WriteMacroSurfaceValues',"")
-!CALL prms%CreateLogicalOption('Part-WriteFieldsToVTK',"")
+CALL prms%CreateLogicalOption('CountNbOfLostParts', "")
+CALL prms%CreateLogicalOption('CartesianPeriodic', "")
+CALL prms%CreateLogicalOption('DoWriteStateToHDF5', "")
+CALL prms%CreateLogicalOption('DoRefMapping', "")
+CALL prms%CreateLogicalOption('MeasureTrackTime', "")
+CALL prms%CreateLogicalOption('Part-vMPF', "")
+CALL prms%CreateLogicalOption('Part-WriteOutputMesh', "")
+CALL prms%CreateLogicalOption('Part-WriteMacroValues',"")
+CALL prms%CreateLogicalOption('Part-WriteMacroVolumeValues',"")
+CALL prms%CreateLogicalOption('Part-WriteMacroSurfaceValues',"")
+CALL prms%CreateLogicalOption('Part-WriteFieldsToVTK',"")
+CALL prms%CreateLogicalOption('PIC-SFResampleAnalyzeSurfCollis', "")
+CALL prms%CreateLogicalOption('PIC-shapefunction-equi', "")
+CALL prms%CreateLogicalOption('printMPINeighborWarnings', "")
+CALL prms%CreateLogicalOption('PrintSFDepoWarnings', "")
 
 CALL prms%CreateRealOption('Part-DelayTime', "")
-!CALL prms%CreateRealOption('Particles-ManualTimeStep', "")
+CALL prms%CreateRealOption('Particles-ManualTimeStep', "")
+CALL prms%CreateRealOption('Part-SafetyFactor', "")
+CALL prms%CreateRealOption('Particles-HaloEpsVelo', "")
+CALL prms%CreateRealOption('RefMappingEps', "")
+CALL prms%CreateRealOption('BezierEpsilonBilinear', "")
+CALL prms%CreateRealOption('PIC-shapefunction-radius', "")
+
+CALL prms%CreateRealArrayOption('Part-FIBGMdeltas', "")
+CALL prms%CreateRealArrayOption('Part-FactorFIBGM', "")
 
 ! No clue how to set this to read it at runtime
 nSpeciesInit = 1!GETINT('Part-nSpecies','1')
@@ -122,18 +148,23 @@ END SUBROUTINE DefineParametersParticles
 SUBROUTINE InitParticles()
 ! MODULES
 USE MOD_Globals!,                   ONLY: MPIRoot,UNIT_STDOUT
-!USE MOD_ReadInTools
+USE Mod_Particle_Globals
+USE MOD_ReadInTools
 USE MOD_IO_HDF5,                    ONLY: AddToElemData,ElementOut
 USE MOD_Mesh_Vars,                  ONLY: nElems
 USE MOD_LoadBalance_Vars,           ONLY: nPartsPerElem
 USE MOD_Particle_Vars,              ONLY: ParticlesInitIsDone,nSpecies!,WriteMacroSurfaceValues
 USE MOD_part_emission,              ONLY: InitializeParticleEmission!, InitializeParticleSurfaceflux
+! partns
 !USE MOD_DSMC_Analyze,               ONLY: InitHODSMC
 !USE MOD_DSMC_Init,                  ONLY: InitDSMC
+
 !USE MOD_LD_Init,                    ONLY: InitLD
 !USE MOD_LD_Vars,                    ONLY: useLD
+
+! partns
 !USE MOD_DSMC_Vars,                  ONLY: useDSMC, DSMC, DSMC_HOSolution,HODSMC
-!USE MOD_Mesh_Vars,                  ONLY: nElems
+USE MOD_Mesh_Vars,                  ONLY: nElems
 !USE MOD_InitializeBackgroundField,  ONLY: InitializeBackgroundField
 !USE MOD_PICInterpolation_Vars,      ONLY: useBGField
 !USE MOD_Particle_Boundary_Sampling, ONLY: InitParticleBoundarySampling
@@ -162,7 +193,10 @@ IF(.NOT.ALLOCATED(nPartsPerElem))THEN
   CALL AddToElemData(ElementOut,'nPartsPerElem',LongIntArray=nPartsPerElem(:))
 END IF
 
+Call InitParticleGlobals
+
 CALL InitializeVariables()
+SWRITE(UNIT_stdOut,'(A)') ' INIT TEST ...'
 
 CALL InitializeParticleEmission()
 !CALL InitializeParticleSurfaceflux()
@@ -226,9 +260,12 @@ USE MOD_Particle_Output_Vars,  ONLY:WriteFieldsToVTK, OutputMesh
 !USE MOD_part_MPFtools,         ONLY:DefinePolyVec, DefineSplitVec
 !USE MOD_PICInterpolation,      ONLY:InitializeInterpolation
 !USE MOD_PICInit,               ONLY:InitPIC
-!USE MOD_Particle_Mesh,         ONLY:InitFIBGM,MapRegionToElem
+
+! partns - do I need this?
+USE MOD_Particle_Mesh,         ONLY:InitFIBGM,MapRegionToElem
+
 USE MOD_Particle_Tracking_Vars,ONLY:DoRefMapping
-!USE MOD_Particle_MPI_Vars,     ONLY:SafetyFactor,halo_eps_velo,PartMPI
+USE MOD_Particle_MPI_Vars,     ONLY:SafetyFactor,halo_eps_velo,PartMPI
 !USE MOD_part_pressure,         ONLY:ParticlePressureIni,ParticlePressureCellIni
 USE MOD_TimeDisc_Vars,         ONLY:TEnd
 #ifdef MPI
@@ -1155,7 +1192,7 @@ IMPLICIT NONE
 !-----------------------------------------------------------------------------------------------------------------------------------
 ! LOCAL VARIABLES
 !===================================================================================================================================
-SDEALLOCATE( Pt_temp)
+!SDEALLOCATE(Pt_temp)
 SDEALLOCATE(PartPosRef)
 SDEALLOCATE(RandomVec)
 SDEALLOCATE(PartState)
